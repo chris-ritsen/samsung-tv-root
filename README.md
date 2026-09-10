@@ -34,9 +34,15 @@ source.
 | `qn90b` | `QN55QN90BAFXZA` | `T-PTMAKUC-1602.3` | `T-PTMAKUC-REL-202310071804`       | Tizen 6.5, Linux 5.4.77, ARMv7                     |
 | `qn90f` | `QN75QN90FAFXZA` | `1203.0`           | `T-RSMFAKUC-0090-REL-202512092052` | Tizen 9.0, Linux 5.4.261, AArch64, Mali-G510 r48p0 |
 
-Other screen sizes, model variants, and firmware versions are untested. The
-preflight reports `tested`, `compatible-untested`, or `incompatible` from the
-platform requirements instead of rejecting every build-number change.
+The QN90F root path was live-tested on firmware 1203.0. Offline comparison of
+Samsung firmware 1301.0 shows that the required SDB and Mali vulnerabilities
+remain present, so this project should support QN90F firmware through at least
+1301.0. Firmware 1301.0 is `compatible-untested` until it is validated on a
+running TV.
+
+Other screen sizes and model variants are untested. The preflight reports
+`tested`, `compatible-untested`, or `incompatible` from the platform
+requirements instead of rejecting every build-number change.
 
 ## Included
 
