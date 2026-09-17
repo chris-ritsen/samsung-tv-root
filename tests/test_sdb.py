@@ -2,7 +2,7 @@ import base64
 import re
 import socket
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -135,6 +135,7 @@ def test_capture_stages_oversized_command(monkeypatch) -> None:
     assert result.output == "staged probe output\n[exit:0]\n"
     assert result.transport_returncode == 1
     assert str(staged["launch"]).startswith(". ")
+    assert isinstance(staged["remote_path"], PurePosixPath)
     assert str(staged["remote_path"]).startswith(
         "/home/owner/share/tmp/sdk_tools/.samsung-tv-root-capture-"
     )

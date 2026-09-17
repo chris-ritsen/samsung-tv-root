@@ -9,7 +9,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .root_agent import (
     DEFAULT_ACCEPT_TIMEOUT,
@@ -22,12 +22,12 @@ from .root_agent import (
     write_secret,
 )
 from .resources import payload_directory
-from .sdb import build_shell_injection, find_sdb, route_callback_host
+from .sdb import build_shell_injection, find_sdb, route_callback_host, sdb_reported_error
 
 
 SDB_PORT = 26101
 DEFAULT_SDB_TIMEOUT = 15.0
-REMOTE_STAGING_DIRECTORY = Path("/home/owner/share/tmp/sdk_tools/qn90f-probe")
+REMOTE_STAGING_DIRECTORY = PurePosixPath("/home/owner/share/tmp/sdk_tools/qn90f-probe")
 REMOTE_PROBE_PATH = REMOTE_STAGING_DIRECTORY / "MaliPhysicalProbe.dll"
 REMOTE_AGENT_PATH = REMOTE_STAGING_DIRECTORY / "SamsungTvRootAgent.dll"
 ROOT_ACQUISITION_PAYLOAD_FILES = (
@@ -95,7 +95,7 @@ class RootExploitCompletion:
         cls,
         connection: RootAgentConnection,
         result: subprocess.CompletedProcess[str],
-        remote_log_path: Path,
+        remote_log_path: PurePosixPath,
         timeout: float,
     ) -> RootExploitCompletion:
         evidence = await connection.execute(
@@ -215,13 +215,13 @@ class SdbExploitClient:
     def ensure_staging_directory(self) -> None:
         self.inject(f"/bin/mkdir -p {REMOTE_STAGING_DIRECTORY}")
 
-    def push(self, local_path: Path, remote_path: Path) -> None:
+    def push(self, local_path: Path, remote_path: PurePosixPath) -> None:
         result = self._run(
             ("-s", self.serial, "push", str(local_path), str(remote_path)),
             check=False,
             timeout=max(self.timeout, 15.0),
         )
-        if result.returncode != 0:
+        if result.returncode != 0 or sdb_reported_error(result):
             raise SdbTransportError(
                 _command_failure(f"sdb push {local_path.name}", result)
             )
@@ -230,8 +230,8 @@ class SdbExploitClient:
         self,
         callback_host: str,
         callback_port: int,
-        remote_token_path: Path,
-        remote_log_path: Path,
+        remote_token_path: PurePosixPath,
+        remote_log_path: PurePosixPath,
         timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         if (
@@ -292,7 +292,7 @@ class Qn90fRootLease:
     config: RootSessionConfig
     connection: RootAgentConnection
     completion: RootExploitCompletion
-    remote_log_path: Path
+    remote_log_path: PurePosixPath
     listener_host: str
     listener_port: int
     closing_listener: asyncio.Server | None = None
@@ -450,8 +450,8 @@ class Qn90fRootAcquirer:
         self,
         token_path: Path,
         launch_log_path: Path,
-        remote_token_path: Path,
-        remote_launch_log_path: Path,
+        remote_token_path: PurePosixPath,
+        remote_launch_log_path: PurePosixPath,
     ) -> None:
         self.sdb.ensure_staging_directory()
         for name in self.config.payload_files:
@@ -462,7 +462,7 @@ class Qn90fRootAcquirer:
         self.sdb.push(token_path, remote_token_path)
         self.sdb.push(launch_log_path, remote_launch_log_path)
 
-    def revoke_token(self, empty_path: Path, remote_token_path: Path) -> None:
+    def revoke_token(self, empty_path: Path, remote_token_path: PurePosixPath) -> None:
         self.sdb.push(empty_path, remote_token_path)
 
 

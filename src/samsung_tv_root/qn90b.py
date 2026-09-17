@@ -10,7 +10,7 @@ import secrets
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .compatibility import (
     QN90B_PROFILE,
@@ -27,7 +27,9 @@ from .root_agent import (
 )
 
 
-REMOTE_DIRECTORY = Path("/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90b")
+REMOTE_DIRECTORY = PurePosixPath(
+    "/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90b"
+)
 REMOTE_PROBE = REMOTE_DIRECTORY / "FdetProbe.dll"
 REMOTE_RUNTIME_CONFIG = REMOTE_DIRECTORY / "FdetProbe.runtimeconfig.json"
 REMOTE_AGENT = REMOTE_DIRECTORY / "SamsungTvRootAgent.dll"
@@ -45,7 +47,7 @@ SCAN_LENGTH = "0x4a000000"
 UEP_GATE_PHYSICAL = "0x208c26c4"
 UEP_GATE_CLOSED = "0x00000001"
 UEP_GATE_OPEN = "0x00000000"
-STOCK_SOCAT = Path("/opt/usr/apps/com.samsung.tizen.smartthings-hub/bin/socat")
+STOCK_SOCAT = PurePosixPath("/opt/usr/apps/com.samsung.tizen.smartthings-hub/bin/socat")
 
 
 class Qn90bError(RuntimeError):

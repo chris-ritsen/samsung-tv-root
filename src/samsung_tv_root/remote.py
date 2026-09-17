@@ -11,7 +11,7 @@ import shlex
 import socket
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Awaitable, Callable
 
 from .config import (
@@ -34,8 +34,8 @@ PROTOCOL_VERSION = "SAMSUNG-TV-REMOTE/1"
 MAXIMUM_FRAME_BYTES = 64 * 1024
 REMOTE_AGENT_NAME = "SamsungTvRemoteInputAgent.dll"
 REMOTE_DIRECTORIES = {
-    "qn90b": Path("/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90b"),
-    "qn90f": Path("/home/owner/share/tmp/sdk_tools/qn90f-probe"),
+    "qn90b": PurePosixPath("/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90b"),
+    "qn90f": PurePosixPath("/home/owner/share/tmp/sdk_tools/qn90f-probe"),
 }
 
 

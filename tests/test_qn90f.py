@@ -1,8 +1,15 @@
 import subprocess
+from pathlib import Path, PurePosixPath
 
 import pytest
 
-from samsung_tv_root.qn90f import RootExploitCompletion, RootSessionError
+from samsung_tv_root.qn90f import (
+    REMOTE_STAGING_DIRECTORY,
+    RootExploitCompletion,
+    RootSessionError,
+    SdbExploitClient,
+    SdbTransportError,
+)
 
 
 def completion_output() -> str:
@@ -48,3 +55,24 @@ def test_qn90f_completion_rejects_wrong_managed_architecture() -> None:
     output = completion_output().replace("architecture=Arm", "architecture=Arm64")
     with pytest.raises(RootSessionError, match="architecture=Arm"):
         RootExploitCompletion.validate(result, output)
+
+
+def test_qn90f_remote_paths_are_always_posix() -> None:
+    assert isinstance(REMOTE_STAGING_DIRECTORY, PurePosixPath)
+    assert str(REMOTE_STAGING_DIRECTORY / "payload.dll") == (
+        "/home/owner/share/tmp/sdk_tools/qn90f-probe/payload.dll"
+    )
+
+
+def test_qn90f_push_rejects_sdb_error_with_zero_exit(monkeypatch) -> None:
+    client = SdbExploitClient(Path("sdb"), "192.0.2.50")
+    result = subprocess.CompletedProcess(
+        ("sdb",),
+        0,
+        "pushed file 100%\n",
+        "error: You cannot push files to this path.\n",
+    )
+    monkeypatch.setattr(client, "_run", lambda *args, **kwargs: result)
+
+    with pytest.raises(SdbTransportError, match="cannot push files"):
+        client.push(Path("probe"), REMOTE_STAGING_DIRECTORY / "probe")

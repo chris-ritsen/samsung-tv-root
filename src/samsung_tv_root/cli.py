@@ -7,7 +7,7 @@ import logging
 import os
 import shlex
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import __version__
 from .compatibility import QN90F_PROFILE, TargetAssessment, TargetCompatibilityError
@@ -46,7 +46,9 @@ from .service import (
 
 
 QN90B_PAYLOAD_DIRECTORY = payload_directory("qn90b")
-QN90F_REMOTE_DIRECTORY = Path("/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90f")
+QN90F_REMOTE_DIRECTORY = PurePosixPath(
+    "/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90f"
+)
 
 
 class CommandError(RuntimeError):
