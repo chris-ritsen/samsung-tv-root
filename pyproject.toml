@@ -1,6 +1,6 @@
 [project]
 name = "samsung-tv-root"
-version = "0.0.2"
+version = "0.0.3"
 description = "Samsung QN90B and QN90F root research tooling"
 readme = "README.md"
 requires-python = ">=3.12"

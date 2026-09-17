@@ -1,9 +1,12 @@
 import base64
+import re
+import socket
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from samsung_tv_root import sdb as sdb_module
 from samsung_tv_root.sdb import SdbClient, SdbError, build_shell_injection
 
 
@@ -50,41 +53,94 @@ def test_require_device_rejects_missing_serial(monkeypatch) -> None:
 def test_require_shell_injection_accepts_closed_transport(monkeypatch) -> None:
     client = SdbClient(Path("sdb"), "192.0.2.50")
     injections: list[str] = []
+    ticks = iter((0.0, 0.1, 1.0, 3.1))
 
     def inject(command: str, **kwargs) -> subprocess.CompletedProcess[str]:
         injections.append(command)
         return subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")
 
-    def run(arguments, **kwargs) -> subprocess.CompletedProcess[str]:
-        remote_path = Path(arguments[3])
-        token = remote_path.name.rsplit("-", 1)[1]
-        Path(arguments[4]).write_text(token, encoding="ascii")
-        return subprocess.CompletedProcess(("sdb",), 0, "pulled\n", "")
-
     monkeypatch.setattr(client, "inject", inject)
-    monkeypatch.setattr(client, "run", run)
+    monkeypatch.setattr(sdb_module.time, "monotonic", lambda: next(ticks))
 
     client.require_shell_injection()
 
     assert len(injections) == 2
-    assert injections[0].startswith("/bin/printf ")
-    assert injections[1].startswith("/bin/rm -f ")
+    assert injections == ["/bin/true", "/bin/sleep 2"]
 
 
-def test_require_shell_injection_reports_missing_marker(monkeypatch) -> None:
+def test_require_shell_injection_rejects_missing_delay(monkeypatch) -> None:
     client = SdbClient(Path("sdb"), "192.0.2.50")
     result = subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")
+    ticks = iter((0.0, 0.1, 1.0, 1.2))
     monkeypatch.setattr(client, "inject", lambda *args, **kwargs: result)
+    monkeypatch.setattr(sdb_module.time, "monotonic", lambda: next(ticks))
+
+    with pytest.raises(SdbError, match="shell execution was not confirmed"):
+        client.require_shell_injection()
+
+
+def test_inject_rejects_oversized_appinstall_argument(monkeypatch) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
     monkeypatch.setattr(
         client,
         "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            ("sdb",), 1, "", "remote file does not exist\n"
-        ),
+        lambda *args, **kwargs: pytest.fail("oversized injection must not run"),
     )
 
-    with pytest.raises(SdbError, match="did not create a retrievable marker"):
-        client.require_shell_injection()
+    with pytest.raises(SdbError, match="maximum safe size is 510"):
+        client.inject("x" * 1000)
+
+
+def test_push_rejects_sdb_error_with_zero_exit(monkeypatch) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+    result = subprocess.CompletedProcess(
+        ("sdb",),
+        0,
+        "pushed file 100%\n",
+        "error: You cannot push files to this path.\n",
+    )
+    monkeypatch.setattr(client, "run", lambda *args, **kwargs: result)
+
+    with pytest.raises(SdbError, match="cannot push files"):
+        client.push(Path("probe"), Path("/invalid/probe"))
+
+
+def test_capture_stages_oversized_command(monkeypatch) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+    staged: dict[str, object] = {}
+
+    def push(local_path: Path, remote_path: Path) -> None:
+        staged["script"] = local_path.read_text(encoding="utf-8")
+        staged["remote_path"] = remote_path
+
+    def inject(command: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        staged["launch"] = command
+        script = str(staged["script"])
+        match = re.search(r"/dev/tcp/127\.0\.0\.1/(\d+)", script)
+        assert match is not None
+        with socket.create_connection(("127.0.0.1", int(match.group(1)))) as peer:
+            peer.sendall(b"staged probe output\n[exit:0]\n")
+        return subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")
+
+    monkeypatch.setattr(client, "push", push)
+    monkeypatch.setattr(client, "inject", inject)
+
+    result = client.capture(
+        "printf '" + ("x" * 1000) + "'",
+        callback_host="127.0.0.1",
+        bind_host="127.0.0.1",
+        timeout=1.0,
+    )
+
+    assert result.output == "staged probe output\n[exit:0]\n"
+    assert result.transport_returncode == 1
+    assert str(staged["launch"]).startswith(". ")
+    assert str(staged["remote_path"]).startswith(
+        "/home/owner/share/tmp/sdk_tools/.samsung-tv-root-capture-"
+    )
+    assert str(staged["script"]).startswith(
+        f"/bin/rm -f {staged['remote_path']}\n"
+    )
 
 
 def test_capture_timeout_reports_active_listener_and_injection_exit(monkeypatch) -> None:

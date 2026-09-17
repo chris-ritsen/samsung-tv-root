@@ -231,7 +231,7 @@ def preflight_qn90f(
     client.require_device()
     client.require_shell_injection()
     print(
-        "Preflight: SDB package-name shell injection confirmed",
+        "Preflight: SDB package-name shell injection confirmed by timing probe",
         file=sys.stderr,
         flush=True,
     )

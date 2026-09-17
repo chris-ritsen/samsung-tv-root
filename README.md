@@ -95,6 +95,33 @@ samsung-tv-root capabilities my-tv
 samsung-tv-root -o json capabilities my-tv
 ```
 
+## Run from source
+
+Python 3.12 or newer can run the host CLI directly; a standalone release is not
+required. From a clone of this repository:
+
+```console
+python -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m samsung_tv_root doctor
+.venv/bin/python -m samsung_tv_root preflight qn90f 192.0.2.50
+```
+
+On Windows, use `py -3.12` to create the environment and replace
+`.venv/bin/python` with `.venv\Scripts\python.exe`. Pass `--sdb` before the
+subcommand when Tizen Studio is not in its default location:
+
+```console
+.venv\Scripts\python.exe -m samsung_tv_root --sdb C:\tizen-studio\tools\sdb.exe preflight qn90f 192.0.2.50
+```
+
+Preflight needs only Python and Samsung's `sdb`. Root operations also need the
+TV payloads: install the .NET 6 SDK and run `make payloads` once in the source
+tree, then use the same `python -m samsung_tv_root qn90f root ...` form.
+
+`uv sync --locked` followed by `uv run samsung-tv-root ...` is the equivalent
+developer workflow.
+
 ## Install a release
 
 Download and extract the archive matching the host:
@@ -136,7 +163,8 @@ export SDB=/absolute/path/to/tizen-studio/tools/sdb
 On the tested retail firmware, a plain interactive `sdb shell` prints `closed`
 and exits. That is expected and does not show whether the exploit works. The
 exploit instead invokes the allowed package installer with a crafted package
-name; preflight verifies that separate path with a temporary marker.
+name; preflight verifies that separate path with a bounded execution-timing
+probe before testing the callback.
 
 In Windows Command Prompt, set the full `sdb.exe` path before testing:
 
@@ -157,19 +185,21 @@ Run the fingerprint preflight, then open a root shell:
 ./samsung-tv-root qn90f root "$TV_IP"
 ```
 
-The QN90F preflight first proves that the SDB package-name injection executed by
-creating and pulling back a temporary marker. It then reports the exact address
-and port where it is waiting for the TV's callback. The command does not change
-firewall rules or configure logging. Override route detection when needed:
+The QN90F preflight first compares a no-op with a bounded two-second delay to
+prove that the SDB package-name injection executed. It then stages a read-only
+fingerprint script through SDB, reports the exact callback address and port,
+and runs that script through the already-authorized shell. The command does not
+change firewall rules, configure logging, or run the root exploit. Override
+route detection when needed:
 
 ```console
 ./samsung-tv-root preflight qn90f "$TV_IP" --callback-host 192.0.2.10
 ```
 
-If the marker succeeds but the callback times out, the package-installer exploit
-ran and the remaining failure is on the reverse callback path. If the marker
-cannot be retrieved, preflight reports that the shell injection itself was not
-confirmed.
+If the timing probe succeeds but the callback times out, the package-installer
+exploit ran and the remaining failure is in staging, script execution, or the
+reverse callback path. A failed timing probe means shell execution itself was
+not confirmed.
 
 To make one explicit attempt without the compatibility preflight:
 

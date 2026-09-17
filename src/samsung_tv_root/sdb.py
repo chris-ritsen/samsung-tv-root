@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,11 @@ from pathlib import Path
 SDB_PORT = 26101
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_CAPTURE_TIMEOUT = 30.0
+SDB_APPINSTALL_PREFIX = "0 appinstall tpk "
+SDB_APPINSTALL_MAX_SAFE_BYTES = 510
+SHELL_INJECTION_DELAY_SECONDS = 2.0
+SHELL_INJECTION_MINIMUM_DELTA = 1.5
+REMOTE_SCRIPT_DIRECTORY = Path("/home/owner/share/tmp/sdk_tools")
 
 
 class SdbError(RuntimeError):
@@ -167,7 +173,7 @@ class SdbClient:
             check=False,
             timeout=max(self.timeout, 15.0),
         )
-        if result.returncode != 0:
+        if result.returncode != 0 or _sdb_reported_error(result):
             raise SdbError(command_failure(f"sdb push {local_path.name}", result))
 
     def pull(self, remote_path: Path, local_path: Path) -> None:
@@ -176,7 +182,7 @@ class SdbClient:
             check=False,
             timeout=max(self.timeout, 30.0),
         )
-        if result.returncode != 0:
+        if result.returncode != 0 or _sdb_reported_error(result):
             raise SdbError(command_failure(f"sdb pull {remote_path}", result))
 
     def inject(
@@ -186,62 +192,50 @@ class SdbClient:
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         injection = build_shell_injection(command)
+        argument = f"{SDB_APPINSTALL_PREFIX}{injection}"
+        argument_size = len(argument.encode("utf-8"))
+        if argument_size > SDB_APPINSTALL_MAX_SAFE_BYTES:
+            raise SdbError(
+                f"SDB appinstall injection is {argument_size} bytes; maximum safe "
+                f"size is {SDB_APPINSTALL_MAX_SAFE_BYTES}. Stage the command first."
+            )
         return self.run(
-            ("-s", self.serial, "shell", f"0 appinstall tpk {injection}"),
+            ("-s", self.serial, "shell", argument),
             check=False,
             timeout=timeout or self.timeout,
         )
 
     def require_shell_injection(self) -> None:
-        token = os.urandom(8).hex()
-        remote_path = Path(
-            f"/home/owner/share/tmp/.samsung-tv-root-probe-{token}"
+        timeout = max(self.timeout, SHELL_INJECTION_DELAY_SECONDS + 5.0)
+        control_elapsed, control = self._timed_injection("/bin/true", timeout)
+        delayed_elapsed, delayed = self._timed_injection(
+            f"/bin/sleep {SHELL_INJECTION_DELAY_SECONDS:g}", timeout
         )
-        result = self.inject(
-            f"/bin/printf {token} >{remote_path}",
-            timeout=max(self.timeout, 15.0),
-        )
+        delay_delta = delayed_elapsed - control_elapsed
+        if delay_delta < SHELL_INJECTION_MINIMUM_DELTA:
+            details = []
+            for name, result in (("control", control), ("delayed", delayed)):
+                output = _completed_output(result)
+                if output:
+                    details.append(f"{name} output: {output}")
+            suffix = f"; {'; '.join(details)}" if details else ""
+            raise SdbError(
+                "SDB is connected, but package-name shell execution was not "
+                f"confirmed: control took {control_elapsed:.3f}s and the "
+                f"{SHELL_INJECTION_DELAY_SECONDS:g}s delay probe took "
+                f"{delayed_elapsed:.3f}s (delta {delay_delta:.3f}s, expected at "
+                f"least {SHELL_INJECTION_MINIMUM_DELTA:g}s){suffix}"
+            )
+
+    def _timed_injection(
+        self, command: str, timeout: float
+    ) -> tuple[float, subprocess.CompletedProcess[str]]:
+        started = time.monotonic()
+        result = self.inject(command, timeout=timeout)
+        elapsed = time.monotonic() - started
         if result.returncode not in (0, 1):
             raise SdbError(command_failure("SDB shell-injection probe", result))
-
-        try:
-            with tempfile.TemporaryDirectory(
-                prefix="samsung-tv-root-probe-"
-            ) as directory:
-                local_path = Path(directory) / "marker"
-                pull = self.run(
-                    (
-                        "-s",
-                        self.serial,
-                        "pull",
-                        str(remote_path),
-                        str(local_path),
-                    ),
-                    check=False,
-                    timeout=max(self.timeout, 15.0),
-                )
-                marker = (
-                    local_path.read_text(encoding="ascii")
-                    if pull.returncode == 0 and local_path.is_file()
-                    else None
-                )
-                if marker != token:
-                    injection_detail = _completed_output(result)
-                    detail = command_failure("sdb pull of shell probe", pull)
-                    if injection_detail:
-                        detail += (
-                            f"; appinstall exited {result.returncode}: "
-                            f"{injection_detail}"
-                        )
-                    raise SdbError(
-                        "SDB is connected, but the package-name shell injection "
-                        f"did not create a retrievable marker: {detail}"
-                    )
-        finally:
-            self.inject(
-                f"/bin/rm -f {remote_path}",
-                timeout=max(self.timeout, 15.0),
-            )
+        return elapsed, result
 
     def capture(
         self,
@@ -266,18 +260,21 @@ class SdbClient:
             listener.listen(1)
             listener.settimeout(timeout)
             callback_port = int(listener.getsockname()[1])
-            if on_listening is not None:
-                on_listening(callback, bind, callback_port)
             wrapped = (
                 f"exec 3<>/dev/tcp/{callback}/{callback_port};"
                 f"{{ {command}; }} >&3 2>&3;"
                 "printf '\\n[exit:%s]\\n' \"$?\" >&3;exec 3>&-"
             )
+            launch_command = wrapped
+            if _injection_argument_size(wrapped) > SDB_APPINSTALL_MAX_SAFE_BYTES:
+                launch_command = self._stage_script(wrapped)
+            if on_listening is not None:
+                on_listening(callback, bind, callback_port)
             state: dict[str, object] = {}
 
             def launch() -> None:
                 try:
-                    state["result"] = self.inject(wrapped, timeout=timeout)
+                    state["result"] = self.inject(launch_command, timeout=timeout)
                 except BaseException as error:
                     state["error"] = error
 
@@ -341,6 +338,22 @@ class SdbClient:
                 ),
             )
 
+    def _stage_script(self, command: str) -> str:
+        token = os.urandom(8).hex()
+        remote_path = REMOTE_SCRIPT_DIRECTORY / (
+            f".samsung-tv-root-capture-{token}.sh"
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="samsung-tv-root-capture-"
+        ) as directory:
+            local_path = Path(directory) / "capture.sh"
+            local_path.write_text(
+                f"/bin/rm -f {remote_path}\n{command}\n",
+                encoding="utf-8",
+            )
+            self.push(local_path, remote_path)
+        return f". {remote_path}"
+
     def run(
         self,
         arguments: tuple[str, ...],
@@ -369,4 +382,17 @@ class SdbClient:
 def _completed_output(result: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(
         value.strip() for value in (result.stdout, result.stderr) if value.strip()
+    )
+
+
+def _injection_argument_size(command: str) -> int:
+    injection = build_shell_injection(command, gate_token="0" * 16)
+    return len(f"{SDB_APPINSTALL_PREFIX}{injection}".encode("utf-8"))
+
+
+def _sdb_reported_error(result: subprocess.CompletedProcess[str]) -> bool:
+    return any(
+        line.lstrip().lower().startswith("error:")
+        for output in (result.stdout, result.stderr)
+        for line in output.splitlines()
     )

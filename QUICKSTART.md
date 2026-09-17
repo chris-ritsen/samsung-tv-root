@@ -26,6 +26,18 @@ Extract the matching release and run:
 Use `samsung-tv-root.exe` on Windows. Supply an unusual Tizen Studio location
 with `--sdb /path/to/tizen-studio/tools/sdb`.
 
+To run from source instead of a standalone release:
+
+```console
+python -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m samsung_tv_root doctor
+```
+
+On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. Preflight needs only
+Python and `sdb`; root commands additionally require the .NET 6 SDK and one
+`make payloads` build.
+
 ## 4. Verify and root the TV
 
 ```console
