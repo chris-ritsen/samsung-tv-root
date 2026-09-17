@@ -122,6 +122,30 @@ def test_same_qn90f_platform_with_new_build_is_attempted() -> None:
     assert assessment.status is CompatibilityStatus.COMPATIBLE
 
 
+@pytest.mark.parametrize(
+    "build",
+    (
+        "T-RSMFUABC-0090-REL-202607141954",
+        "T-RSMFUBAC-0090-REL-202607141954",
+    ),
+)
+def test_reviewed_regional_qn90f_1301_build_is_attempted(build: str) -> None:
+    assessment = QN90F_PROFILE.assess(
+        qn90f_output(build=build)
+    ).require_compatible()
+
+    assert assessment.status is CompatibilityStatus.COMPATIBLE
+
+
+def test_unreviewed_regional_qn90f_build_fails_closed() -> None:
+    assessment = QN90F_PROFILE.assess(
+        qn90f_output(build="T-RSMFUABC-0090-REL-202701010101")
+    )
+
+    with pytest.raises(TargetCompatibilityError, match="not a reviewed"):
+        assessment.require_compatible()
+
+
 def test_qn90f_without_r48p0_fails_before_exploit() -> None:
     assessment = QN90F_PROFILE.assess(
         qn90f_output(capabilities=("DOTNET", "MALI_DEVICE", "MALI_LIBRARY"))

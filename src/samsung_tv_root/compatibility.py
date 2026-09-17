@@ -118,6 +118,7 @@ class ExploitCompatibilityProfile:
     tizen_prefix: str
     required_capabilities: frozenset[str]
     capability_probes: tuple[str, ...]
+    compatible_builds: frozenset[str] = frozenset()
 
     def probe_command(self) -> str:
         commands = (
@@ -142,9 +143,13 @@ class ExploitCompatibilityProfile:
             )
         if fingerprint.build_id is None:
             failures.append("build ID was not observed")
-        elif not fingerprint.build_id.startswith(self.build_family):
+        elif (
+            not fingerprint.build_id.startswith(self.build_family)
+            and fingerprint.build_id not in self.compatible_builds
+        ):
             failures.append(
-                f"build {fingerprint.build_id} is outside {self.build_family}"
+                f"build {fingerprint.build_id} is outside {self.build_family} "
+                "and is not a reviewed compatible build"
             )
         if fingerprint.kernel_release is None:
             failures.append("kernel release was not observed")
@@ -259,5 +264,11 @@ QN90F_PROFILE = ExploitCompatibilityProfile(
             "mali-r48p0",
             "grep -a -q r48p0 /usr/lib/driver/libmali.so 2>/dev/null",
         ),
+    ),
+    compatible_builds=frozenset(
+        (
+            "T-RSMFUABC-0090-REL-202607141954",
+            "T-RSMFUBAC-0090-REL-202607141954",
+        )
     ),
 )

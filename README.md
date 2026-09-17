@@ -35,10 +35,13 @@ source.
 | `qn90f` | `QN75QN90FAFXZA` | `1203.0`           | `T-RSMFAKUC-0090-REL-202512092052` | Tizen 9.0, Linux 5.4.261, AArch64, Mali-G510 r48p0 |
 
 The QN90F root path was live-tested on firmware 1203.0. Offline comparison of
-Samsung firmware 1301.0 shows that the required SDB and Mali vulnerabilities
+Samsung firmware 1301.0 for both `T-RSMFAKUC-0090` and the regional
+`T-RSMFUABC-0090` package shows that the required SDB and Mali vulnerabilities
 remain present, so this project should support QN90F firmware through at least
-1301.0. Firmware 1301.0 is `compatible-untested` until it is validated on a
-running TV.
+1301.0. One regional TV reports `T-RSMFUBAC-0090-1301.0` in its UI; the matching
+Samsung package and internal build use `T-RSMFUABC-0090`. Both reviewed build
+identifiers are accepted as `compatible-untested` until validated on a running
+TV.
 
 Other screen sizes and model variants are untested. The preflight reports
 `tested`, `compatible-untested`, or `incompatible` from the platform
@@ -102,7 +105,8 @@ Download and extract the archive matching the host:
 
 Each archive contains a standalone host executable, TV payloads built from this
 source, documentation, and the corresponding source tree. Samsung's `sdb` is
-not redistributed; install Tizen Studio separately.
+not redistributed; install [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
+separately.
 
 Run the installation check:
 
@@ -129,8 +133,20 @@ export SDB=/absolute/path/to/tizen-studio/tools/sdb
 "$SDB" devices
 ```
 
-A normal `sdb shell` closing immediately is expected on the tested retail
-firmware. The package installer remains the command foothold.
+On the tested retail firmware, a plain interactive `sdb shell` prints `closed`
+and exits. That is expected and does not show whether the exploit works. The
+exploit instead invokes the allowed package installer with a crafted package
+name; preflight verifies that separate path with a temporary marker.
+
+In Windows Command Prompt, set the full `sdb.exe` path before testing:
+
+```bat
+set TV_IP=192.0.2.50
+set SDB=C:\tizen-studio\tools\sdb.exe
+"%SDB%" connect "%TV_IP%:26101"
+"%SDB%" devices
+samsung-tv-root.exe preflight qn90f "%TV_IP%"
+```
 
 ## One root session
 
@@ -140,6 +156,29 @@ Run the fingerprint preflight, then open a root shell:
 ./samsung-tv-root preflight qn90f "$TV_IP"
 ./samsung-tv-root qn90f root "$TV_IP"
 ```
+
+The QN90F preflight first proves that the SDB package-name injection executed by
+creating and pulling back a temporary marker. It then reports the exact address
+and port where it is waiting for the TV's callback. The command does not change
+firewall rules or configure logging. Override route detection when needed:
+
+```console
+./samsung-tv-root preflight qn90f "$TV_IP" --callback-host 192.0.2.10
+```
+
+If the marker succeeds but the callback times out, the package-installer exploit
+ran and the remaining failure is on the reverse callback path. If the marker
+cannot be retrieved, preflight reports that the shell injection itself was not
+confirmed.
+
+To make one explicit attempt without the compatibility preflight:
+
+```console
+./samsung-tv-root qn90f root "$TV_IP" --skip-preflight
+```
+
+This skips only the fingerprint gate. Root acquisition still requires the TV to
+connect back to the listening host.
 
 Use `qn90b` for the older TV. Run one command with:
 

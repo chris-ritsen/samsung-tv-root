@@ -7,6 +7,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -310,9 +311,11 @@ class Qn90fRootAcquirer:
         self,
         config: RootSessionConfig,
         sdb: SdbExploitClient,
+        on_listening: Callable[[str, str, int, float], None] | None = None,
     ) -> None:
         self.config = config
         self.sdb = sdb
+        self.on_listening = on_listening
 
     async def acquire(self) -> Qn90fRootLease:
         self.validate_target()
@@ -348,6 +351,13 @@ class Qn90fRootAcquirer:
                 await server.start()
                 try:
                     listener_port = server.listening_port
+                    if self.on_listening is not None:
+                        self.on_listening(
+                            self.config.callback_host,
+                            self.config.bind_host,
+                            listener_port,
+                            self.config.accept_timeout,
+                        )
                     launch_result = await asyncio.to_thread(
                         self.sdb.launch_root_agent,
                         self.config.callback_host,
@@ -356,7 +366,17 @@ class Qn90fRootAcquirer:
                         remote_launch_log_path,
                         max(self.config.accept_timeout + 15.0, 30.0),
                     )
-                    connection = await server.accept(self.config.accept_timeout)
+                    try:
+                        connection = await server.accept(self.config.accept_timeout)
+                    except RootAgentUnavailableError as error:
+                        raise RootAgentUnavailableError(
+                            "no authenticated root agent connected to callback "
+                            f"{self.config.callback_host}:{listener_port} within "
+                            f"{self.config.accept_timeout:g}s; listener "
+                            f"{self.config.bind_host}:{listener_port} was active. "
+                            "The exploit may have failed before callback; otherwise "
+                            "check the inbound firewall and callback route."
+                        ) from error
                     completion = await RootExploitCompletion.read_from_agent(
                         connection,
                         launch_result,
@@ -451,10 +471,11 @@ class Qn90fRootSession:
         self,
         config: RootSessionConfig,
         sdb: SdbExploitClient,
+        on_listening: Callable[[str, str, int, float], None] | None = None,
     ) -> None:
         self.config = config
         self.sdb = sdb
-        self.acquirer = Qn90fRootAcquirer(config, sdb)
+        self.acquirer = Qn90fRootAcquirer(config, sdb, on_listening)
 
     async def run(self, commands: list[str] | None) -> int:
         lease = await self.acquirer.acquire()
@@ -617,9 +638,19 @@ def run_root_session(
         command_timeout=command_timeout,
         payload_directory=payload_directory.resolve(),
     )
+    def report_listener(callback: str, bind: str, port: int, timeout: float) -> None:
+        binding = "" if callback == bind else f" (bound at {bind}:{port})"
+        print(
+            f"Root: waiting up to {timeout:g}s for authenticated TV callback at "
+            f"{callback}:{port}{binding}",
+            file=sys.stderr,
+            flush=True,
+        )
+
     session = Qn90fRootSession(
         config,
         SdbExploitClient(find_sdb(), tv_host, timeout=sdb_timeout),
+        report_listener,
     )
     return asyncio.run(session.run(commands))
 

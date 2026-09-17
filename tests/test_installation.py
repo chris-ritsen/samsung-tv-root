@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from samsung_tv_root import __version__
 from samsung_tv_root.controller import (
     ControlEndpoint,
@@ -33,6 +35,14 @@ def test_configured_sdb_is_first_candidate(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SDB", str(executable))
     assert sdb_candidates()[0] == executable
     assert discover_sdb() == executable.resolve()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path semantics")
+def test_windows_default_sdb_candidate_is_drive_absolute(monkeypatch) -> None:
+    monkeypatch.delenv("SDB", raising=False)
+    monkeypatch.setenv("SystemDrive", "C:")
+
+    assert Path(r"C:\tizen-studio\tools\sdb.exe") in sdb_candidates()
 
 
 def test_frozen_payload_directory(monkeypatch, tmp_path: Path) -> None:

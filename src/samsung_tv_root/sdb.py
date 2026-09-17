@@ -6,7 +6,9 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,10 +51,11 @@ def sdb_candidates() -> tuple[Path, ...]:
         )
     )
     if os.name == "nt":
+        system_drive = os.environ.get("SystemDrive", "C:").rstrip("\\/") + "\\"
         candidates.extend(
             Path(root) / "tizen-studio" / "tools" / executable
             for root in (
-                os.environ.get("SystemDrive", "C:"),
+                system_drive,
                 os.environ.get("ProgramFiles", "C:/Program Files"),
                 os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local")),
             )
@@ -144,6 +147,17 @@ class SdbClient:
         if result.returncode != 0:
             raise SdbError(command_failure("sdb connect", result))
 
+    def require_device(self) -> None:
+        result = self.run(("devices",), check=True)
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if fields and fields[0] == self.serial:
+                state = fields[1] if len(fields) > 1 else "unknown"
+                if state == "device":
+                    return
+                raise SdbError(f"SDB device {self.serial} is {state}, not ready")
+        raise SdbError(f"SDB device {self.serial} is not listed by sdb devices")
+
     def disconnect(self) -> None:
         self.run(("disconnect", self.serial), check=False)
 
@@ -178,6 +192,57 @@ class SdbClient:
             timeout=timeout or self.timeout,
         )
 
+    def require_shell_injection(self) -> None:
+        token = os.urandom(8).hex()
+        remote_path = Path(
+            f"/home/owner/share/tmp/.samsung-tv-root-probe-{token}"
+        )
+        result = self.inject(
+            f"/bin/printf {token} >{remote_path}",
+            timeout=max(self.timeout, 15.0),
+        )
+        if result.returncode not in (0, 1):
+            raise SdbError(command_failure("SDB shell-injection probe", result))
+
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="samsung-tv-root-probe-"
+            ) as directory:
+                local_path = Path(directory) / "marker"
+                pull = self.run(
+                    (
+                        "-s",
+                        self.serial,
+                        "pull",
+                        str(remote_path),
+                        str(local_path),
+                    ),
+                    check=False,
+                    timeout=max(self.timeout, 15.0),
+                )
+                marker = (
+                    local_path.read_text(encoding="ascii")
+                    if pull.returncode == 0 and local_path.is_file()
+                    else None
+                )
+                if marker != token:
+                    injection_detail = _completed_output(result)
+                    detail = command_failure("sdb pull of shell probe", pull)
+                    if injection_detail:
+                        detail += (
+                            f"; appinstall exited {result.returncode}: "
+                            f"{injection_detail}"
+                        )
+                    raise SdbError(
+                        "SDB is connected, but the package-name shell injection "
+                        f"did not create a retrievable marker: {detail}"
+                    )
+        finally:
+            self.inject(
+                f"/bin/rm -f {remote_path}",
+                timeout=max(self.timeout, 15.0),
+            )
+
     def capture(
         self,
         command: str,
@@ -186,15 +251,23 @@ class SdbClient:
         bind_host: str | None = None,
         port: int = 0,
         timeout: float = DEFAULT_CAPTURE_TIMEOUT,
+        on_listening: Callable[[str, str, int], None] | None = None,
     ) -> CaptureResult:
         callback = callback_host or route_callback_host(self.tv_host)
         bind = bind_host or callback
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind((bind, port))
+            try:
+                listener.bind((bind, port))
+            except OSError as error:
+                raise SdbError(
+                    f"cannot listen for TV callback on {bind}:{port}: {error}"
+                ) from error
             listener.listen(1)
             listener.settimeout(timeout)
             callback_port = int(listener.getsockname()[1])
+            if on_listening is not None:
+                on_listening(callback, bind, callback_port)
             wrapped = (
                 f"exec 3<>/dev/tcp/{callback}/{callback_port};"
                 f"{{ {command}; }} >&3 2>&3;"
@@ -213,11 +286,33 @@ class SdbClient:
             try:
                 connection, _ = listener.accept()
             except TimeoutError as error:
+                worker.join(timeout=0.25)
                 failure = state.get("error")
                 if isinstance(failure, BaseException):
-                    raise SdbError(str(failure)) from failure
+                    raise SdbError(
+                        f"TV did not connect to callback {callback}:{callback_port} "
+                        f"within {timeout:g}s; listener {bind}:{callback_port} was "
+                        f"active, but SDB injection failed: {failure}"
+                    ) from failure
+                result = state.get("result")
+                if isinstance(result, subprocess.CompletedProcess):
+                    detail = command_failure("SDB injection", result)
+                    if result.returncode not in (0, 1):
+                        raise SdbError(
+                            f"{detail}; no TV callback reached "
+                            f"{callback}:{callback_port}"
+                        ) from error
+                    injection = f"SDB injection exited {result.returncode}"
+                    output = _completed_output(result)
+                    if output:
+                        injection += f": {output}"
+                else:
+                    injection = "SDB injection was still running"
                 raise SdbError(
-                    f"TV callback did not connect within {timeout:g}s"
+                    f"TV did not connect to callback {callback}:{callback_port} "
+                    f"within {timeout:g}s; listener {bind}:{callback_port} was active "
+                    f"and {injection}. Check the inbound firewall, callback route, "
+                    "and Developer Mode host IP."
                 ) from error
             with connection:
                 connection.settimeout(timeout)
@@ -269,3 +364,9 @@ class SdbClient:
         if check and result.returncode != 0:
             raise SdbError(command_failure("sdb", result))
         return result
+
+
+def _completed_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(
+        value.strip() for value in (result.stdout, result.stderr) if value.strip()
+    )
