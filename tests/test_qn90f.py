@@ -1,4 +1,5 @@
 import subprocess
+import asyncio
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -9,6 +10,9 @@ from samsung_tv_root.qn90f import (
     RootSessionError,
     SdbExploitClient,
     SdbTransportError,
+    Qn90fRootSession,
+    RootSessionConfig,
+    TVDeviceProfile,
 )
 
 
@@ -76,3 +80,84 @@ def test_qn90f_push_rejects_sdb_error_with_zero_exit(monkeypatch) -> None:
 
     with pytest.raises(SdbTransportError, match="cannot push files"):
         client.push(Path("probe"), REMOTE_STAGING_DIRECTORY / "probe")
+
+
+def test_qn90f_interactive_session_uses_pty_shell(monkeypatch, tmp_path) -> None:
+    identity = type(
+        "Identity",
+        (),
+        {
+            "pid": 1,
+            "uid": 0,
+            "euid": 0,
+            "gid": 0,
+            "egid": 0,
+            "effective_capabilities": "3fffffffff",
+            "smack_label": "User",
+        },
+    )()
+    connection = type("Connection", (), {"identity": identity})()
+    completion = type(
+        "Completion",
+        (),
+        {"sdk_uid": 901, "sdk_gid": 901, "transport_returncode": 1},
+    )()
+
+    class Lease:
+        remote_log_path = REMOTE_STAGING_DIRECTORY / "log"
+        listener_host = "192.0.2.10"
+        listener_port = 49152
+
+        def __init__(self) -> None:
+            self.connection = connection
+            self.completion = completion
+            self.shutdown_called = False
+            self.close_called = False
+
+        async def shutdown(self) -> None:
+            self.shutdown_called = True
+
+        async def close(self) -> None:
+            self.close_called = True
+
+    lease = Lease()
+    config = RootSessionConfig(
+        profile=TVDeviceProfile(),
+        tv_host="192.0.2.50",
+        callback_host="192.0.2.10",
+        bind_host="192.0.2.10",
+        listener_port=0,
+        accept_timeout=30.0,
+        command_timeout=45.0,
+        payload_directory=tmp_path,
+        shell_port=22333,
+        shell_connect_timeout=12.5,
+        payload_files=(),
+    )
+    session = Qn90fRootSession(config, object())
+    monkeypatch.setattr(session.acquirer, "acquire", lambda: _async_value(lease))
+    observed: dict[str, object] = {}
+
+    class Shell:
+        def __init__(self, shell_config) -> None:
+            observed["config"] = shell_config
+
+        async def run(self, shell_connection) -> int:
+            observed["connection"] = shell_connection
+            return 0
+
+    monkeypatch.setattr("samsung_tv_root.qn90f.Qn90fRootShell", Shell)
+
+    assert asyncio.run(session.run(None)) == 0
+    shell_config = observed["config"]
+    assert shell_config.tv_host == "192.0.2.50"
+    assert shell_config.allowed_host == "192.0.2.10"
+    assert shell_config.port == 22333
+    assert shell_config.connect_timeout == 12.5
+    assert observed["connection"] is connection
+    assert lease.shutdown_called
+    assert lease.close_called
+
+
+async def _async_value(value):
+    return value

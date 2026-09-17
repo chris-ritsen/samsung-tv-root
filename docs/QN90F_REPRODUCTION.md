@@ -1,6 +1,6 @@
 # QN90F root reproduction
 
-## Tested target
+## Tested targets
 
 | Property | Value |
 | --- | --- |
@@ -12,10 +12,22 @@
 | GPU | Mali-G510 r48p0, API 1.14 |
 | Initial identity | `uid=901(sdk) gid=901(sdk)` |
 
-Preflight classifies the exact build as `tested`. Builds in the same firmware,
-kernel, runtime, and Mali-driver family can classify as `compatible-untested`.
-Missing platform requirements classify the target as `incompatible` before the
-kernel payload runs.
+An independent public-release validation added this regional target:
+
+| Property | Value |
+| --- | --- |
+| Model | `QA55QN90FAUXEG` |
+| Firmware | `1301.0` |
+| Build | `T-RSMFUABC-0090-REL-202607141954` |
+| OS | Tizen 9.0, Linux 5.4.261, AArch64 |
+| GPU | Mali-G510 r48p0 |
+| Host | Windows 10 x86-64, public v0.0.3 release |
+| Result | Authenticated root and volatile UEP disable |
+
+Both exact builds classify as `tested`. Builds in the same firmware, kernel,
+runtime, and Mali-driver family can classify as `compatible-untested`. Missing
+platform requirements classify the target as `incompatible` before the kernel
+payload runs.
 
 ## Setup
 
@@ -120,14 +132,71 @@ Root remains volatile and disappears when the TV reboots.
 
 ## Unsigned native execution
 
-Root and UEP are separate. Managed payloads and the root agent work through the
-signed .NET runtime without changing UEP. The per-boot UEP state is available
-through:
+Root and UEP are separate. There are two useful execution paths.
+
+### Signed .NET host
+
+Samsung's signed `/usr/bin/dotnet` can load an uploaded managed assembly while
+UEP remains enabled. This is the bootstrap, recovery, and TV-platform
+integration path used by the root and UEP payloads in this repository. Stage a
+tool and its runtime configuration as data, then invoke the signed host:
+
+```console
+"$SDB" -s "$TV_IP:26101" push MyTool.dll /home/owner/share/tmp/MyTool.dll
+"$SDB" -s "$TV_IP:26101" push MyTool.runtimeconfig.json \
+  /home/owner/share/tmp/MyTool.runtimeconfig.json
+uv run samsung-tv-root qn90f root "$TV_IP" --command \
+  '/usr/bin/dotnet /home/owner/share/tmp/MyTool.dll'
+```
+
+This path runs a managed `.dll`; it does not make an arbitrary native ELF
+acceptable. Direct ELF loading and anonymous `fexecve` were both rejected while
+UEP was enabled.
+
+### Direct native tools
+
+For normal native commands such as Vim, first request the guarded per-boot UEP
+transition:
 
 ```console
 uv run samsung-tv-root qn90f uep "$TV_IP" status
 uv run samsung-tv-root qn90f uep "$TV_IP" disable
 ```
+
+Continue only when validation passes and the output reports either a verified
+one-to-zero transition or `uep_status_action=already-disabled` with
+`uep_status_before=0`. Then upload and install an ARM EABI5 executable under a
+normal persistent package path:
+
+```console
+"$SDB" -s "$TV_IP:26101" push my-tool /home/owner/share/tmp/my-tool
+uv run samsung-tv-root qn90f root "$TV_IP" --command \
+  'install -d -m 0755 /opt/my-tool/bin && \
+   install -m 0755 /home/owner/share/tmp/my-tool /opt/my-tool/bin/my-tool && \
+   /opt/my-tool/bin/my-tool'
+```
+
+The QN90F kernel is AArch64, but the verified Tizen userspace and installed
+native toolchain are 32-bit ARM EABI5. A static binary is the simplest package.
+For dynamically linked programs, use the TV's `/lib/ld-linux.so.3`
+interpreter, put private libraries beside the package, and patch a relative ELF
+`RUNPATH` such as `$ORIGIN/../lib`. The installed program must remain an
+ordinary executable such as `/opt/vim/bin/vim`; do not hide a dynamic-loader
+command in an alias, shell function, or renamed `.real` binary. Add package
+`bin` directories to `PATH` and set application data paths normally. A Vim
+layout, for example, can be:
+
+```text
+/opt/vim/bin/vim
+/opt/vim/lib/libtinfo.so.6
+/opt/vim/share/vim/vim82
+```
+
+The files under `/opt/<package>` survive a normal reboot. Authorization does
+not: UEP returns to its stock state, so direct native execution must remain
+fail-closed until the root path validates and disables UEP again. Stop
+immediately and remove the live trigger if the TV displays a Smart Security or
+malicious-process prompt.
 
 The tested QN90F state word is physical `0x20b58030`. The implementation checks
 its surrounding kernel state and the expected one-to-zero transition before

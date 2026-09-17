@@ -70,6 +70,11 @@ class TargetAssessment:
     tested_kernel: str
     differences: tuple[str, ...]
     failures: tuple[str, ...]
+    additional_tested_builds: tuple[str, ...] = ()
+
+    @property
+    def tested_builds(self) -> tuple[str, ...]:
+        return (self.tested_build, *self.additional_tested_builds)
 
     def require_compatible(self) -> TargetAssessment:
         if self.status is CompatibilityStatus.INCOMPATIBLE:
@@ -84,18 +89,19 @@ class TargetAssessment:
         if self.status is not CompatibilityStatus.TESTED:
             raise TargetCompatibilityError(
                 f"{operation} uses build-specific addresses and requires the tested "
-                f"build {self.tested_build}; observed "
+                f"builds {', '.join(self.tested_builds)}; observed "
                 f"{self.fingerprint.build_id or 'unknown'}"
             )
         return self
 
     def render(self) -> str:
         fingerprint = self.fingerprint
+        tested_label = "Tested build" if len(self.tested_builds) == 1 else "Tested builds"
         lines = [
             f"Compatibility: {self.status.value}",
             f"Profile: {self.profile}",
             f"Build: {fingerprint.build_id or 'unknown'}",
-            f"Tested build: {self.tested_build}",
+            f"{tested_label}: {', '.join(self.tested_builds)}",
             f"Kernel: {fingerprint.kernel_release or 'unknown'}",
             f"Architecture: {fingerprint.architecture or 'unknown'}",
             f"Tizen: {fingerprint.tizen_release or 'unknown'}",
@@ -119,6 +125,11 @@ class ExploitCompatibilityProfile:
     required_capabilities: frozenset[str]
     capability_probes: tuple[str, ...]
     compatible_builds: frozenset[str] = frozenset()
+    additional_tested_builds: frozenset[str] = frozenset()
+
+    @property
+    def tested_builds(self) -> frozenset[str]:
+        return self.additional_tested_builds | {self.tested_build}
 
     def probe_command(self) -> str:
         commands = (
@@ -143,9 +154,10 @@ class ExploitCompatibilityProfile:
             )
         if fingerprint.build_id is None:
             failures.append("build ID was not observed")
-        elif (
-            not fingerprint.build_id.startswith(self.build_family)
-            and fingerprint.build_id not in self.compatible_builds
+        elif not fingerprint.build_id.startswith(
+            self.build_family
+        ) and fingerprint.build_id not in (
+            self.compatible_builds | self.tested_builds
         ):
             failures.append(
                 f"build {fingerprint.build_id} is outside {self.build_family} "
@@ -179,7 +191,7 @@ class ExploitCompatibilityProfile:
                 + ", ".join(missing_capabilities)
             )
         differences: list[str] = []
-        if fingerprint.build_id != self.tested_build:
+        if fingerprint.build_id not in self.tested_builds:
             differences.append(
                 f"build {fingerprint.build_id or 'unknown'} differs from "
                 f"{self.tested_build}"
@@ -203,6 +215,7 @@ class ExploitCompatibilityProfile:
             tested_kernel=self.tested_kernel,
             differences=tuple(differences),
             failures=tuple(failures),
+            additional_tested_builds=tuple(sorted(self.additional_tested_builds)),
         )
 
 
@@ -267,8 +280,10 @@ QN90F_PROFILE = ExploitCompatibilityProfile(
     ),
     compatible_builds=frozenset(
         (
-            "T-RSMFUABC-0090-REL-202607141954",
             "T-RSMFUBAC-0090-REL-202607141954",
         )
+    ),
+    additional_tested_builds=frozenset(
+        ("T-RSMFUABC-0090-REL-202607141954",)
     ),
 )

@@ -21,6 +21,12 @@ from .root_agent import (
     generate_secret,
     write_secret,
 )
+from .qn90f_shell import (
+    DEFAULT_CONNECT_TIMEOUT as DEFAULT_SHELL_CONNECT_TIMEOUT,
+    DEFAULT_ROOT_SHELL_PORT,
+    Qn90fRootShell,
+    RootShellConfig,
+)
 from .resources import payload_directory
 from .sdb import build_shell_injection, find_sdb, route_callback_host, sdb_reported_error
 
@@ -81,6 +87,8 @@ class RootSessionConfig:
     accept_timeout: float
     command_timeout: float
     payload_directory: Path
+    shell_port: int = DEFAULT_ROOT_SHELL_PORT
+    shell_connect_timeout: float = DEFAULT_SHELL_CONNECT_TIMEOUT
     payload_files: tuple[str, ...] = ROOT_ACQUISITION_PAYLOAD_FILES
 
 
@@ -506,7 +514,15 @@ class Qn90fRootSession:
             if commands:
                 status = await self._run_commands(lease.connection, commands)
             else:
-                status = await self._interactive(lease.connection)
+                status = await Qn90fRootShell(
+                    RootShellConfig(
+                        tv_host=self.config.tv_host,
+                        allowed_host=self.config.callback_host,
+                        port=self.config.shell_port,
+                        connect_timeout=self.config.shell_connect_timeout,
+                        command_timeout=self.config.command_timeout,
+                    )
+                ).run(lease.connection)
             await lease.shutdown()
             return status
         finally:
@@ -532,27 +548,6 @@ class Qn90fRootSession:
             if result.exit_code != 0:
                 final_status = result.exit_code
         return final_status
-
-    async def _interactive(self, connection: RootAgentConnection) -> int:
-        while True:
-            try:
-                command = await asyncio.to_thread(input, "qn90f-root> ")
-            except EOFError:
-                return 0
-            if not command.strip():
-                continue
-            if command.strip() in {"exit", "quit"}:
-                return 0
-            result = await connection.execute(command, self.config.command_timeout)
-            if result.stdout:
-                sys.stdout.write(result.stdout)
-            if result.stderr:
-                sys.stderr.write(result.stderr)
-            print(
-                f"[exit={result.exit_code} timed_out={str(result.timed_out).lower()}]",
-                flush=True,
-            )
-
 
 def _single_integer_line(lines: tuple[str, ...], name: str) -> int:
     match = _single_match(
@@ -606,6 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--sdb-timeout", type=float, default=DEFAULT_SDB_TIMEOUT)
     parser.add_argument("--command", action="append")
+    parser.add_argument("--shell-port", type=int, default=DEFAULT_ROOT_SHELL_PORT)
+    parser.add_argument(
+        "--shell-connect-timeout",
+        type=float,
+        default=DEFAULT_SHELL_CONNECT_TIMEOUT,
+    )
     parser.add_argument(
         "--payload-directory",
         type=Path,
@@ -626,6 +627,8 @@ def run_root_session(
     sdb_timeout: float = DEFAULT_SDB_TIMEOUT,
     payload_directory: Path = DEFAULT_PAYLOAD_DIRECTORY,
     commands: list[str] | None = None,
+    shell_port: int = DEFAULT_ROOT_SHELL_PORT,
+    shell_connect_timeout: float = DEFAULT_SHELL_CONNECT_TIMEOUT,
 ) -> int:
     resolved_callback_host = callback_host or route_callback_host(tv_host)
     config = RootSessionConfig(
@@ -637,6 +640,8 @@ def run_root_session(
         accept_timeout=accept_timeout,
         command_timeout=command_timeout,
         payload_directory=payload_directory.resolve(),
+        shell_port=shell_port,
+        shell_connect_timeout=shell_connect_timeout,
     )
     def report_listener(callback: str, bind: str, port: int, timeout: float) -> None:
         binding = "" if callback == bind else f" (bound at {bind}:{port})"
@@ -672,6 +677,8 @@ def main(argv: list[str] | None = None) -> None:
                 sdb_timeout=arguments.sdb_timeout,
                 payload_directory=arguments.payload_directory,
                 commands=arguments.command,
+                shell_port=arguments.shell_port,
+                shell_connect_timeout=arguments.shell_connect_timeout,
             )
         )
     except RootAgentError as error:

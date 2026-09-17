@@ -33,15 +33,15 @@ source.
 | ------- | ---------------- | ------------------ | ---------------------------------- | -------------------------------------------------- |
 | `qn90b` | `QN55QN90BAFXZA` | `T-PTMAKUC-1602.3` | `T-PTMAKUC-REL-202310071804`       | Tizen 6.5, Linux 5.4.77, ARMv7                     |
 | `qn90f` | `QN75QN90FAFXZA` | `1203.0`           | `T-RSMFAKUC-0090-REL-202512092052` | Tizen 9.0, Linux 5.4.261, AArch64, Mali-G510 r48p0 |
+| `qn90f` | `QA55QN90FAUXEG` | `1301.0`           | `T-RSMFUABC-0090-REL-202607141954` | Tizen 9.0, Linux 5.4.261, AArch64, Mali-G510 r48p0 |
 
-The QN90F root path was live-tested on firmware 1203.0. Offline comparison of
-Samsung firmware 1301.0 for both `T-RSMFAKUC-0090` and the regional
-`T-RSMFUABC-0090` package shows that the required SDB and Mali vulnerabilities
-remain present, so this project should support QN90F firmware through at least
-1301.0. One regional TV reports `T-RSMFUBAC-0090-1301.0` in its UI; the matching
-Samsung package and internal build use `T-RSMFUABC-0090`. Both reviewed build
-identifiers are accepted as `compatible-untested` until validated on a running
-TV.
+The QN90F root path was live-tested on firmware 1203.0 and 1301.0. The 1301.0
+validation used the public v0.0.3 Windows x86-64 release on `QA55QN90FAUXEG` and
+confirmed the SDB foothold, authenticated UID/GID 0 root agent, full capability
+mask, credential and GPU page-table restoration, root command execution, and
+volatile UEP disable. Its UI firmware string was reported as
+`T-RSMFUBAC-0090-1301.0`; the authoritative on-device build fingerprint and
+Samsung package use `T-RSMFUABC-0090`.
 
 Other screen sizes and model variants are untested. The preflight reports
 `tested`, `compatible-untested`, or `incompatible` from the platform
@@ -185,6 +185,13 @@ Run the fingerprint preflight, then open a root shell:
 ./samsung-tv-root qn90f root "$TV_IP"
 ```
 
+Without `--command`, the QN90F command opens one persistent Bash process on a
+real PTY. Shell state such as `cd` and exported variables persists; terminal
+control, `clear`, Ctrl-C, full-screen programs, and window resizing are relayed.
+Type `exit` or press Ctrl-D to close it. The temporary TV listener accepts only
+the selected controller address, defaults to TCP port 22222, and is removed
+when the session ends. Use `--shell-port PORT` if that port is unavailable.
+
 The QN90F preflight first compares a no-op with a bounded two-second delay to
 prove that the SDB package-name injection executed. It then stages a read-only
 fingerprint script through SDB, reports the exact callback address and port,
@@ -223,8 +230,37 @@ Inspect or disable UEP for the current boot:
 ./samsung-tv-root qn90f uep "$TV_IP" disable
 ```
 
+`disable` is idempotent. A successful result reports a validated kernel
+neighborhood and either `uep_status_action=disabled` with
+`uep_status_after=0`, or `uep_status_action=already-disabled` with
+`uep_status_before=0`. Run it before opening the root shell when that shell will
+launch uploaded native ELF programs. If a root shell is already open, exit it,
+run `uep disable`, and reopen it; do not start a second exploit session in
+parallel just to change UEP.
+
+A normal `sdb shell` remains closed on the tested retail firmware. `sdb` file
+transfer still works independently:
+
+```console
+"$SDB" -s "$TV_IP:26101" push ./local-file /home/owner/share/tmp/local-file
+"$SDB" -s "$TV_IP:26101" pull /home/owner/share/tmp/remote-file ./remote-file
+```
+
+The Windows Command Prompt forms are:
+
+```bat
+"%SDB%" -s "%TV_IP%:26101" push local-file /home/owner/share/tmp/local-file
+"%SDB%" -s "%TV_IP%:26101" pull /home/owner/share/tmp/remote-file remote-file
+```
+
+TV paths passed to `sdb` are POSIX paths even on a Windows host, so prefer
+`/home/owner/share/tmp/...` there as well. To pull a root-only file, first use
+the root shell to copy it into `/home/owner/share/tmp` with an SDK-readable mode,
+then run `sdb pull` from the host.
+
 UEP compatibility differs from root compatibility. The model reproduction
-documents describe the tested boundaries.
+document describes the tested boundaries and both supported application
+execution paths.
 
 ## Continuous controller
 

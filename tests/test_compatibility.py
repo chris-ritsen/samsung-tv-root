@@ -122,16 +122,19 @@ def test_same_qn90f_platform_with_new_build_is_attempted() -> None:
     assert assessment.status is CompatibilityStatus.COMPATIBLE
 
 
-@pytest.mark.parametrize(
-    "build",
-    (
-        "T-RSMFUABC-0090-REL-202607141954",
-        "T-RSMFUBAC-0090-REL-202607141954",
-    ),
-)
-def test_reviewed_regional_qn90f_1301_build_is_attempted(build: str) -> None:
+def test_live_tested_regional_qn90f_1301_build_is_tested() -> None:
     assessment = QN90F_PROFILE.assess(
-        qn90f_output(build=build)
+        qn90f_output(build="T-RSMFUABC-0090-REL-202607141954")
+    ).require_compatible()
+
+    assert assessment.status is CompatibilityStatus.TESTED
+    assert assessment.differences == ()
+    assert "T-RSMFUABC-0090-REL-202607141954" in assessment.tested_builds
+
+
+def test_unobserved_regional_qn90f_build_spelling_remains_compatible() -> None:
+    assessment = QN90F_PROFILE.assess(
+        qn90f_output(build="T-RSMFUBAC-0090-REL-202607141954")
     ).require_compatible()
 
     assert assessment.status is CompatibilityStatus.COMPATIBLE
@@ -167,6 +170,14 @@ def test_compatible_assessment_explains_untested_difference() -> None:
     rendered = assessment.render()
     assert "Compatibility: compatible-untested" in rendered
     assert "Difference: build" in rendered
+
+
+def test_qn90f_assessment_lists_both_live_tested_builds() -> None:
+    assessment = QN90F_PROFILE.assess(qn90f_output())
+    rendered = assessment.render()
+    assert "Tested builds:" in rendered
+    assert "T-RSMFAKUC-0090-REL-202512092052" in rendered
+    assert "T-RSMFUABC-0090-REL-202607141954" in rendered
 
 
 def test_probe_commands_collect_required_runtime_capabilities() -> None:

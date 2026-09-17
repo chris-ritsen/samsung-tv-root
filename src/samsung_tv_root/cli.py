@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shlex
 import sys
 from pathlib import Path, PurePosixPath
@@ -35,6 +36,8 @@ from .qn90f import (
     TVDeviceProfile,
     run_root_session,
 )
+from .qn90f_shell import DEFAULT_CONNECT_TIMEOUT as DEFAULT_SHELL_CONNECT_TIMEOUT
+from .qn90f_shell import DEFAULT_ROOT_SHELL_PORT
 from .sdb import SdbClient, SdbError, find_sdb
 from .resources import payload_directory
 from .service import (
@@ -357,6 +360,8 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
         sdb_timeout=arguments.sdb_timeout,
         payload_directory=arguments.payload_directory,
         commands=arguments.command,
+        shell_port=arguments.shell_port,
+        shell_connect_timeout=arguments.shell_connect_timeout,
     )
 
 
@@ -383,12 +388,66 @@ def command_qn90f_uep(arguments: argparse.Namespace) -> int:
     mode = "disable-uep" if arguments.action == "disable" else "inspect-uep"
     invocation = shlex.join(("/usr/bin/dotnet", str(remote_payload), mode))
     output = client.capture(invocation, timeout=arguments.command_timeout).output
-    if "uep_status_validation=pass" not in output:
-        raise CommandError("QN90F UEP neighborhood validation did not pass")
-    if mode == "disable-uep" and "uep_status_action=disabled" not in output:
-        raise CommandError("QN90F UEP disable transition was not confirmed")
+    require_qn90f_uep_result(output, disable=mode == "disable-uep")
     print(output, end="" if output.endswith("\n") else "\n")
     return 0
+
+
+def require_qn90f_uep_result(output: str, *, disable: bool) -> None:
+    lines = tuple(line.strip() for line in output.splitlines() if line.strip())
+    required = (
+        f"probe={'disable-uep' if disable else 'inspect-uep'}",
+        "uep_status_validation=pass",
+        "physical_page_pte_state=restored",
+    )
+    missing = tuple(marker for marker in required if marker not in lines)
+    if missing:
+        raise CommandError(
+            "QN90F UEP evidence is incomplete: " + ", ".join(missing)
+        )
+    exit_status = _single_qn90f_uep_value(lines, "exit", r"-?[0-9]+", brackets=True)
+    if exit_status != "0":
+        raise CommandError(f"QN90F UEP payload exited with status {exit_status}")
+    before = _single_qn90f_uep_value(lines, "uep_status_before", r"[01]")
+    action = _single_qn90f_uep_value(
+        lines,
+        "uep_status_action",
+        r"inspect-only|already-disabled|disabled",
+    )
+    if not disable:
+        if action != "inspect-only":
+            raise CommandError("QN90F UEP inspection evidence is inconsistent")
+        return
+    if action == "disabled" and before == "1":
+        if "uep_status_write_observed=0" not in lines:
+            raise CommandError("QN90F UEP zero write evidence is missing")
+        if "uep_status_after=0" not in lines:
+            raise CommandError("QN90F UEP zero readback is missing")
+        return
+    if action == "already-disabled" and before == "0":
+        return
+    raise CommandError("QN90F UEP disable transition was not confirmed")
+
+
+def _single_qn90f_uep_value(
+    lines: tuple[str, ...],
+    name: str,
+    value_pattern: str,
+    *,
+    brackets: bool = False,
+) -> str:
+    if brackets:
+        pattern = re.compile(rf"\[{re.escape(name)}:({value_pattern})\]")
+    else:
+        pattern = re.compile(rf"{re.escape(name)}=({value_pattern})")
+    values = tuple(
+        match.group(1) for line in lines if (match := pattern.fullmatch(line))
+    )
+    if len(values) != 1:
+        raise CommandError(
+            f"QN90F UEP evidence requires one {name} value; observed {len(values)}"
+        )
+    return values[0]
 
 
 def command_qn90f_serve(arguments: argparse.Namespace) -> int:
@@ -642,6 +701,12 @@ def build_parser() -> argparse.ArgumentParser:
     qn90f_root.add_argument("--bind-host")
     qn90f_root.add_argument("--port", type=int, default=0)
     qn90f_root.add_argument("--accept-timeout", type=float, default=30.0)
+    qn90f_root.add_argument("--shell-port", type=int, default=DEFAULT_ROOT_SHELL_PORT)
+    qn90f_root.add_argument(
+        "--shell-connect-timeout",
+        type=float,
+        default=DEFAULT_SHELL_CONNECT_TIMEOUT,
+    )
     qn90f_root.add_argument(
         "--skip-preflight",
         action="store_true",
