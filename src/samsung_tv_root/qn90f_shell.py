@@ -25,8 +25,6 @@ REMOTE_RUNTIME_ROOT = PurePosixPath("/run/samsung-tv-root")
 REMOTE_ROOT_HOME = PurePosixPath(
     "/home/owner/share/tmp/sdk_tools/samsung-tv-root/root-home"
 )
-REMOTE_ROOT_BASHRC = REMOTE_ROOT_HOME / ".bashrc"
-REMOTE_ROOT_BOOTSTRAP = REMOTE_ROOT_HOME / ".shell-bootstrap"
 ROOT_SHELL_RESIZE_MARKER = "__SAMSUNG_TV_ROOT_SHELL_RESIZE__"
 ROOT_SHELL_STOP_MARKER = "__SAMSUNG_TV_ROOT_SHELL_STOP__"
 
@@ -131,6 +129,20 @@ class Qn90fRootShell:
             return 0
         except BaseException as error:
             active_error = error
+            if listener_started and isinstance(error, RootShellError):
+                try:
+                    result = await agent.execute(
+                        build_remote_log_command(self.runtime_directory),
+                        self.config.command_timeout,
+                    )
+                    detail = (result.stdout or result.stderr).strip()
+                except BaseException:
+                    detail = ""
+                if detail:
+                    active_error = RootShellError(
+                        f"{error}; TV listener log:\n{detail}"
+                    )
+                    raise active_error from error
             raise
         finally:
             if shell_connection is not None:
@@ -275,46 +287,35 @@ def build_remote_listener_command(
         f"TCP-LISTEN:{port},reuseaddr,range={address}/32,"
         f"accept-timeout={int(accept_timeout + 0.999)}"
     )
-    shell_command = shlex.join(
-        (
-            "/usr/bin/env",
-            "-i",
-            f"HOME={REMOTE_ROOT_HOME}",
-            "USER=root",
-            "LOGNAME=root",
-            "TERM=xterm-256color",
-            "SHELL=/bin/bash",
-            "/bin/bash",
-            str(REMOTE_ROOT_BOOTSTRAP),
-        )
+    shell_setup = (
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin;"
+        "export PATH;PS1='# ';export PS1;"
+        "exec /bin/bash --noprofile --norc -i"
     )
+    shell_command = (
+        f"/usr/bin/env -i HOME={REMOTE_ROOT_HOME} USER=root LOGNAME=root "
+        "TERM=xterm-256color SHELL=/bin/bash "
+        f'/bin/bash -c "{shell_setup}"'
+    )
+    # EXEC only splits a simple command on spaces, so it cannot preserve the
+    # Bash -c argument. SYSTEM delegates the fixed inline command to signed sh.
     shell = shlex.quote(
-        f"EXEC:{shell_command},pty,ctty,stderr,setsid,sigint,sane"
+        f"SYSTEM:{shell_command},pty,ctty,stderr,setsid,sigint,sane"
     )
     home = shlex.quote(str(REMOTE_ROOT_HOME))
-    bashrc = shlex.quote(str(REMOTE_ROOT_BASHRC))
-    bootstrap = shlex.quote(str(REMOTE_ROOT_BOOTSTRAP))
-    bashrc_contents = shlex.quote(
-        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
-        "PS1='# '\n"
-    )
-    bootstrap_contents = shlex.quote(
-        "set -a\n"
-        f". {REMOTE_ROOT_BASHRC}\n"
-        "set +a\n"
-        "exec /bin/bash --noprofile --norc -i\n"
-    )
     return (
         f"d={runtime};p=$d/pid;l=$d/log;"
         f"mkdir -p \"$d\" {home}&&chmod 700 \"$d\" {home}||exit 1;"
-        f"printf %s {bashrc_contents}>{bashrc}&&chmod 600 {bashrc}||exit 1;"
-        f"printf %s {bootstrap_contents}>{bootstrap}"
-        f"&&chmod 700 {bootstrap}||exit 1;"
         f"(exec {socat} {listener} {shell}) </dev/null >\"$l\" 2>&1&"
         'pid=$!;printf "%s\\n" "$pid">"$p";sleep 1;'
         'if ! kill -0 "$pid" 2>/dev/null;then '
         'cat "$l" 2>/dev/null;exit 1;fi'
     )
+
+
+def build_remote_log_command(runtime_directory: PurePosixPath) -> str:
+    runtime = shlex.quote(str(runtime_directory))
+    return f'd={runtime};l=$d/log;if [ -r "$l" ];then cat "$l";fi'
 
 
 def build_remote_stop_command(runtime_directory: PurePosixPath) -> str:

@@ -1,4 +1,4 @@
-# Host controller
+# Host controller guide
 
 The controller keeps volatile root available without modifying the TV's boot
 configuration. It runs on a computer that has Tizen Studio `sdb` access to the
@@ -13,10 +13,25 @@ samsung-tv-root config init
 samsung-tv-root config check
 ```
 
+`config init` prints the file it created. The defaults are:
+
+| Host | Configuration file |
+| --- | --- |
+| Windows | `%APPDATA%\samsung-tv-root\config.toml` |
+| macOS | `~/Library/Application Support/samsung-tv-root/config.toml` |
+| Linux | `$XDG_CONFIG_HOME/samsung-tv-root/config.toml`, or `~/.config/samsung-tv-root/config.toml` when unset |
+
+Release examples use `samsung-tv-root` as the command name. Use
+`samsung-tv-root.exe` on Windows and `./samsung-tv-root` when running directly
+from an extracted Linux or macOS archive.
+
 The minimal file is:
 
 ```toml
 version = 1
+
+# Optional when sdb is outside the standard Tizen Studio locations.
+# sdb = "C:/tizen-studio/tools/sdb.exe"
 
 [televisions.my-tv]
 model = "qn90f"
@@ -32,6 +47,19 @@ rules = []
 
 Add another table under `televisions` for another TV. `device_id` may contain
 the TV's exact SSDP UUID when address matching is insufficient.
+
+These tables are also profiles for direct model commands. With one matching
+profile, the host can be omitted:
+
+```console
+samsung-tv-root preflight qn90f
+samsung-tv-root qn90f root
+samsung-tv-root qn90f uep status
+```
+
+When multiple profiles use the same model, select one explicitly with
+`samsung-tv-root qn90f root --profile my-tv`. An explicit host positional
+argument remains available for one-off use.
 
 `disable_native_execution_policy` controls a separate volatile UEP state. Root
 does not require UEP to be disabled because the controller executes its

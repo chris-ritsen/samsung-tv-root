@@ -141,8 +141,24 @@ Run the installation check:
 ./samsung-tv-root doctor
 ```
 
-Use `samsung-tv-root.exe` on Windows. Pass an unusual Tizen Studio location with
-`--sdb /path/to/tizen-studio/tools/sdb`.
+Use `samsung-tv-root.exe` on Windows. Put an unusual Tizen Studio location
+before the command, for example
+`./samsung-tv-root --sdb /path/to/tizen-studio/tools/sdb doctor`.
+
+Create the configuration once, then replace the example name and address with
+the TV's values:
+
+```console
+./samsung-tv-root config init
+./samsung-tv-root config check
+```
+
+Each table under `televisions` is a named profile. Direct `preflight`, `root`,
+`uep`, and `serve` commands infer the profile when the configuration contains
+exactly one TV for that model. If it contains multiple TVs of the same model,
+select one with `--profile NAME`. Supplying a host explicitly remains supported.
+For a nonstandard Tizen Studio installation, add a top-level
+`sdb = "C:/path/to/tizen-studio/tools/sdb.exe"`; explicit `--sdb` still wins.
 
 ## Enable Developer Mode
 
@@ -178,7 +194,15 @@ samsung-tv-root.exe preflight qn90f "%TV_IP%"
 
 ## One root session
 
-Run the fingerprint preflight, then open a root shell:
+With one configured QN90F profile, run the fingerprint preflight and open a
+root shell without repeating its address:
+
+```console
+./samsung-tv-root preflight qn90f
+./samsung-tv-root qn90f root
+```
+
+The equivalent explicit-host form is:
 
 ```console
 ./samsung-tv-root preflight qn90f "$TV_IP"
@@ -223,7 +247,14 @@ Use `qn90b` for the older TV. Run one command with:
 ./samsung-tv-root qn90f root "$TV_IP" --command 'id; uname -a'
 ```
 
-Inspect or disable UEP for the current boot:
+With a configured profile, inspect or disable UEP for the current boot:
+
+```console
+./samsung-tv-root qn90f uep status
+./samsung-tv-root qn90f uep disable
+```
+
+The explicit-host forms are:
 
 ```console
 ./samsung-tv-root qn90f uep "$TV_IP" status
@@ -264,7 +295,8 @@ execution paths.
 
 ## Continuous controller
 
-Create the default no-remap configuration:
+Create the default no-remap configuration if one was not already created for
+the direct commands:
 
 ```console
 ./samsung-tv-root config init
@@ -305,13 +337,15 @@ QN90F also implements:
 ./samsung-tv-root display wake my-tv
 ```
 
-See [Controller](docs/CONTROLLER.md) and [Remote input](docs/REMOTE_POLICY.md)
-for configuration and extension details.
+See the [controller](docs/user/CONTROLLER.md) and
+[remote input](docs/user/REMOTE_POLICY.md) guides for configuration and
+extension details.
 
 ## Firmware keys
 
-Firmware-key extraction is included for both tested models. See
-[SWU AES extraction](docs/AES_EXTRACTION.md).
+Firmware-key extraction is included for both tested models. Its advanced,
+source-oriented procedure is in the
+[SWU AES extraction research note](docs/research-notes/AES_EXTRACTION.md).
 
 ## Build from source
 
@@ -330,12 +364,8 @@ the supported host architectures, and publishes archives for `v*` tags.
 
 ## Documentation
 
-- [Quick start](QUICKSTART.md)
-- [Controller](docs/CONTROLLER.md)
-- [Remote input](docs/REMOTE_POLICY.md)
-- [Exploit chain](docs/EXPLOIT_CHAIN.md)
-- [QN90B reproduction](docs/QN90B_REPRODUCTION.md)
-- [QN90F reproduction](docs/QN90F_REPRODUCTION.md)
-- [SWU AES extraction](docs/AES_EXTRACTION.md)
+Start with the [quick start](QUICKSTART.md). The
+[documentation index](docs/README.md) separates practical end-user guides from
+implementation and reverse-engineering research notes.
 
 This project is released under the [Unlicense](LICENSE).

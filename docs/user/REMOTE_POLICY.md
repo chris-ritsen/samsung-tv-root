@@ -1,4 +1,4 @@
-# Remote input
+# Remote input guide
 
 Remote handling is disabled by default and has no implicit mappings. The host
 controller only touches an input device whose exact kernel name appears in the

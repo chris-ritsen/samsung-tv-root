@@ -341,7 +341,12 @@ async def serve(arguments: argparse.Namespace) -> int:
 
 
 def add_serve_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("host")
+    parser.add_argument("host", nargs="?")
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="configured television name; inferred when one QN90F profile exists",
+    )
     parser.add_argument(
         "--control-file",
         dest="control_file",

@@ -11,7 +11,9 @@ from samsung_tv_root.qn90f_shell import (
     ROOT_SHELL_STOP_MARKER,
     Qn90fRootShell,
     RootShellConfig,
+    RootShellError,
     build_remote_listener_command,
+    build_remote_log_command,
     build_remote_resize_command,
     build_remote_stop_command,
 )
@@ -57,8 +59,11 @@ def test_listener_uses_signed_socat_stock_bash_and_one_host() -> None:
     assert "# " in command
     assert "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" in command
     assert "qn90f-root" not in command
-    assert ".shell-bootstrap" in command
-    assert "set -a" in command
+    assert ".shell-bootstrap" not in command
+    assert ".bashrc" not in command
+    assert "/bin/bash -c" in command
+    assert "SYSTEM:/usr/bin/env" in command
+    assert "EXEC:/usr/bin/env" not in command
     assert "exec /bin/bash --noprofile --norc -i" in command
     assert "pty,ctty,stderr,setsid,sigint,sane" in command
     assert "/opt/" not in command.replace(str(QN90F_SIGNED_SOCAT), "")
@@ -84,6 +89,14 @@ def test_stop_command_only_kills_owned_socat_pid() -> None:
     assert 'kill "$pid"' in command
     assert f"{ROOT_SHELL_STOP_MARKER}:stopped" in command
     assert str(RUNTIME) in command
+
+
+def test_log_command_reads_only_owned_runtime_log() -> None:
+    command = build_remote_log_command(RUNTIME)
+
+    assert str(RUNTIME) in command
+    assert 'l=$d/log' in command
+    assert 'cat "$l"' in command
 
 
 def test_resize_command_targets_exact_connection_pty() -> None:
@@ -190,3 +203,34 @@ def test_shell_stops_listener_when_connection_fails(monkeypatch) -> None:
 
     assert len(commands) == 2
     assert ROOT_SHELL_STOP_MARKER in commands[1]
+
+
+def test_shell_reports_listener_log_when_handshake_fails(monkeypatch) -> None:
+    commands: list[str] = []
+
+    class Agent:
+        async def execute(self, command: str, timeout: float) -> RootAgentResult:
+            commands.append(command)
+            if 'l=$d/log' in command and 'cat "$l"' in command:
+                return result(stdout="bash: unsigned script rejected\n")
+            if ROOT_SHELL_STOP_MARKER in command:
+                return result(stdout=f"{ROOT_SHELL_STOP_MARKER}:stopped\n")
+            return result()
+
+    connection = type("Socket", (), {"close": lambda self: None})()
+    shell = Qn90fRootShell(
+        RootShellConfig("192.0.2.50", "192.0.2.10"),
+        runtime_token="01234567",
+    )
+    monkeypatch.setattr(shell, "_connect", lambda: connection)
+    monkeypatch.setattr(
+        shell,
+        "_require_root_connection",
+        lambda _: (_ for _ in ()).throw(RootShellError("closed without response")),
+    )
+
+    with pytest.raises(RootShellError, match="unsigned script rejected"):
+        asyncio.run(shell.run(Agent()))
+
+    assert len(commands) == 3
+    assert ROOT_SHELL_STOP_MARKER in commands[2]

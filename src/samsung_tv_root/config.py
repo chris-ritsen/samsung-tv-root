@@ -75,6 +75,7 @@ class TelevisionConfiguration:
 class ApplicationConfiguration:
     televisions: tuple[TelevisionConfiguration, ...]
     retry: RetryConfiguration
+    sdb: str | None
 
     def television(self, name: str) -> TelevisionConfiguration:
         for television in self.televisions:
@@ -107,7 +108,7 @@ def load_configuration(path: Path) -> ApplicationConfiguration:
 
 def parse_configuration(value: object) -> ApplicationConfiguration:
     root = _table(value, "configuration")
-    _reject_unknown(root, {"version", "televisions", "retry"}, "configuration")
+    _reject_unknown(root, {"version", "sdb", "televisions", "retry"}, "configuration")
     version = root.get("version")
     if version != CONFIGURATION_VERSION:
         raise ConfigurationError(
@@ -130,11 +131,15 @@ def parse_configuration(value: object) -> ApplicationConfiguration:
     return ApplicationConfiguration(
         televisions=televisions,
         retry=RetryConfiguration(delays=delays),
+        sdb=_optional_string(root.get("sdb"), "sdb"),
     )
 
 
 def configuration_template() -> str:
     return """version = 1
+
+# Uncomment when sdb is outside the standard Tizen Studio locations.
+# sdb = "C:/tizen-studio/tools/sdb.exe"
 
 [televisions.my-tv]
 model = "qn90f"

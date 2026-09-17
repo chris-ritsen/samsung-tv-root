@@ -1,5 +1,10 @@
 # Samsung SWU passphrase dump
 
+> **Research note:** This file preserves implementation and reverse-engineering
+> details. It is not an end-user setup guide and may contain dated,
+> source-checkout-specific procedures. Start with the
+> [quick start](../../QUICKSTART.md) for normal use.
+
 `swu_passphrase_dump.py` asks Samsung's SWU trusted application to decrypt the
 firmware passphrase blobs already stored on a rooted TV. Its TEEC client is an
 original bounded implementation of the verified GlobalPlatform ABI and

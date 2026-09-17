@@ -17,10 +17,18 @@ def base_configuration() -> dict[str, object]:
 
 def test_remote_policy_is_inactive_by_default() -> None:
     configuration = parse_configuration(base_configuration())
+    assert configuration.sdb is None
     remote = configuration.television("living-room").remote
     assert remote.enabled is False
     assert remote.devices == ()
     assert remote.rules == ()
+
+
+def test_optional_sdb_path_is_parsed() -> None:
+    value = base_configuration()
+    value["sdb"] = "C:/tizen-studio/tools/sdb.exe"
+
+    assert parse_configuration(value).sdb == "C:/tizen-studio/tools/sdb.exe"
 
 
 def test_enabled_remote_requires_an_explicit_device() -> None:

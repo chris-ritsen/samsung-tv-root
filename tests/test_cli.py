@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,20 @@ def qn90f_uep_output(*lines: str, mode: str = "disable-uep") -> str:
     )
 
 
+def write_profiles(path: Path, *profiles: tuple[str, str, str]) -> None:
+    sections = ["version = 1", ""]
+    for name, model, host in profiles:
+        sections.extend(
+            (
+                f"[televisions.{name}]",
+                f'model = "{model}"',
+                f'host = "{host}"',
+                "",
+            )
+        )
+    path.write_text("\n".join(sections), encoding="utf-8")
+
+
 def test_preflight_parser_accepts_callback_overrides() -> None:
     arguments = cli.build_parser().parse_args(
         [
@@ -36,6 +51,122 @@ def test_preflight_parser_accepts_callback_overrides() -> None:
     assert arguments.callback_host == "192.0.2.10"
     assert arguments.bind_host == "0.0.0.0"
     assert arguments.port == 49152
+
+
+def test_qn90f_root_parser_allows_configured_target() -> None:
+    arguments = cli.build_parser().parse_args(["qn90f", "root"])
+
+    assert arguments.host is None
+    assert arguments.profile is None
+
+
+def test_direct_target_infers_only_matching_model(tmp_path, capsys) -> None:
+    config = tmp_path / "config.toml"
+    write_profiles(
+        config,
+        ("bedroom", "qn90b", "192.0.2.40"),
+        ("living-room", "qn90f", "192.0.2.50"),
+    )
+    arguments = cli.build_parser().parse_args(
+        ["--config", str(config), "qn90f", "root"]
+    )
+
+    cli.resolve_direct_target(arguments, "qn90f")
+
+    assert arguments.host == "192.0.2.50"
+    assert "profile=living-room" in capsys.readouterr().err
+
+
+def test_direct_target_applies_configured_relative_sdb(tmp_path, monkeypatch) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """version = 1
+sdb = "tools/sdb"
+
+[televisions.living-room]
+model = "qn90f"
+host = "192.0.2.50"
+""",
+        encoding="utf-8",
+    )
+    arguments = cli.build_parser().parse_args(
+        ["--config", str(config), "qn90f", "root"]
+    )
+    monkeypatch.delenv("SDB", raising=False)
+
+    cli.resolve_direct_target(arguments, "qn90f")
+
+    assert Path(os.environ["SDB"]) == tmp_path / "tools" / "sdb"
+
+
+def test_direct_target_selects_named_profile(tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    write_profiles(
+        config,
+        ("living-room", "qn90f", "192.0.2.50"),
+        ("office", "qn90f", "192.0.2.51"),
+    )
+    arguments = cli.build_parser().parse_args(
+        [
+            "--config",
+            str(config),
+            "qn90f",
+            "root",
+            "--profile",
+            "office",
+        ]
+    )
+
+    cli.resolve_direct_target(arguments, "qn90f")
+
+    assert arguments.host == "192.0.2.51"
+
+
+def test_direct_target_requires_profile_when_model_is_ambiguous(tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    write_profiles(
+        config,
+        ("living-room", "qn90f", "192.0.2.50"),
+        ("office", "qn90f", "192.0.2.51"),
+    )
+    arguments = cli.build_parser().parse_args(
+        ["--config", str(config), "qn90f", "root"]
+    )
+
+    with pytest.raises(cli.CommandError, match="multiple qn90f profiles"):
+        cli.resolve_direct_target(arguments, "qn90f")
+
+
+def test_direct_target_rejects_wrong_model_and_explicit_host(tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    write_profiles(config, ("bedroom", "qn90b", "192.0.2.40"))
+    wrong_model = cli.build_parser().parse_args(
+        [
+            "--config",
+            str(config),
+            "qn90f",
+            "root",
+            "--profile",
+            "bedroom",
+        ]
+    )
+    explicit_host = cli.build_parser().parse_args(
+        ["qn90f", "root", "192.0.2.50", "--profile", "living-room"]
+    )
+
+    with pytest.raises(cli.CommandError, match="uses model qn90b"):
+        cli.resolve_direct_target(wrong_model, "qn90f")
+    with pytest.raises(cli.CommandError, match="either HOST or --profile"):
+        cli.resolve_direct_target(explicit_host, "qn90f")
+
+
+def test_uep_action_can_be_used_without_host() -> None:
+    arguments = cli.build_parser().parse_args(["qn90f", "uep", "disable"])
+
+    cli.normalize_uep_arguments(arguments)
+
+    assert arguments.host is None
+    assert arguments.action == "disable"
 
 
 def test_qn90f_root_can_explicitly_skip_preflight(monkeypatch, capsys) -> None:

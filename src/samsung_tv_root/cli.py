@@ -14,6 +14,7 @@ from . import __version__
 from .compatibility import QN90F_PROFILE, TargetAssessment, TargetCompatibilityError
 from .capabilities import CapabilityError
 from .config import (
+    ApplicationConfiguration,
     ConfigurationError,
     configuration_template,
     default_configuration_path,
@@ -125,6 +126,7 @@ def command_configuration(arguments: argparse.Namespace) -> int:
     emit(
         {
             "configuration": str(path),
+            "sdb": configuration.sdb or "auto-discovery",
             "televisions": [
                 {
                     "name": television.name,
@@ -142,8 +144,79 @@ def command_configuration(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def apply_configured_sdb(
+    arguments: argparse.Namespace,
+    configuration: ApplicationConfiguration,
+    path: Path,
+) -> None:
+    if arguments.sdb is not None or configuration.sdb is None:
+        return
+    configured = Path(configuration.sdb).expanduser()
+    if not configured.is_absolute():
+        configured = path.parent / configured
+    os.environ["SDB"] = str(configured.resolve())
+
+
+def resolve_direct_target(arguments: argparse.Namespace, model: str) -> None:
+    host = getattr(arguments, "host", None)
+    profile_name = getattr(arguments, "profile", None)
+    if host is not None:
+        if profile_name is not None:
+            raise CommandError("use either HOST or --profile, not both")
+        return
+
+    path = arguments.config.expanduser().resolve()
+    if not path.is_file():
+        raise CommandError(
+            f"HOST was omitted and no configuration exists at {path}; "
+            "run 'samsung-tv-root config init' or provide HOST"
+        )
+    configuration = load_configuration(path)
+    apply_configured_sdb(arguments, configuration, path)
+    if profile_name is not None:
+        television = configuration.television(profile_name)
+        if television.model != model:
+            raise CommandError(
+                f"profile {profile_name} uses model {television.model}, not {model}"
+            )
+    else:
+        matches = tuple(
+            television
+            for television in configuration.televisions
+            if television.model == model
+        )
+        if not matches:
+            raise CommandError(f"configuration has no {model} television profile")
+        if len(matches) > 1:
+            names = ", ".join(television.name for television in matches)
+            raise CommandError(
+                f"configuration has multiple {model} profiles: {names}; "
+                "use --profile NAME"
+            )
+        television = matches[0]
+
+    arguments.host = television.host
+    print(
+        f"Target: profile={television.name} model={television.model} "
+        f"host={television.host}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def normalize_uep_arguments(arguments: argparse.Namespace) -> None:
+    actions = {"status", "disable"}
+    if arguments.action is None and arguments.host in actions:
+        arguments.action = arguments.host
+        arguments.host = None
+    if arguments.action not in actions:
+        raise CommandError("UEP action must be status or disable")
+
+
 def command_daemon(arguments: argparse.Namespace) -> int:
-    configuration = load_configuration(arguments.config.expanduser().resolve())
+    path = arguments.config.expanduser().resolve()
+    configuration = load_configuration(path)
+    apply_configured_sdb(arguments, configuration, path)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -287,6 +360,7 @@ def qn90b_exploit(
 
 
 def command_preflight(arguments: argparse.Namespace) -> int:
+    resolve_direct_target(arguments, arguments.tv)
     if arguments.tv == "qn90b":
         exploit = Qn90bRootExploit(
             arguments.host,
@@ -312,6 +386,7 @@ def command_preflight(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90b_root(arguments: argparse.Namespace) -> int:
+    resolve_direct_target(arguments, "qn90b")
     exploit = qn90b_exploit(arguments)
     if arguments.command:
         result = exploit.execute(arguments.command, timeout=arguments.command_timeout)
@@ -322,6 +397,8 @@ def command_qn90b_root(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90b_uep(arguments: argparse.Namespace) -> int:
+    normalize_uep_arguments(arguments)
+    resolve_direct_target(arguments, "qn90b")
     exploit = qn90b_exploit(arguments, require_tested=True)
     result = (
         exploit.disable_uep()
@@ -333,6 +410,7 @@ def command_qn90b_uep(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90f_root(arguments: argparse.Namespace) -> int:
+    resolve_direct_target(arguments, "qn90f")
     if arguments.skip_preflight:
         print(
             "Preflight: skipped; proceeding without target compatibility checks",
@@ -366,6 +444,8 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90f_uep(arguments: argparse.Namespace) -> int:
+    normalize_uep_arguments(arguments)
+    resolve_direct_target(arguments, "qn90f")
     print_assessment(preflight_qn90f(arguments.host, arguments.sdb_timeout))
     payload = arguments.payload_directory / "MaliPhysicalProbe.dll"
     runtime = arguments.payload_directory / "MaliPhysicalProbe.runtimeconfig.json"
@@ -451,12 +531,18 @@ def _single_qn90f_uep_value(
 
 
 def command_qn90f_serve(arguments: argparse.Namespace) -> int:
+    resolve_direct_target(arguments, "qn90f")
     print_assessment(preflight_qn90f(arguments.host, arguments.sdb_timeout))
     return asyncio.run(serve(arguments))
 
 
 def add_transport_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("host")
+    parser.add_argument("host", nargs="?")
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="configured television name; inferred when one model match exists",
+    )
     parser.add_argument("--sdb-timeout", type=float, default=15.0)
 
 
@@ -689,7 +775,7 @@ def build_parser() -> argparse.ArgumentParser:
     qn90b_root.set_defaults(handler=command_qn90b_root)
     qn90b_uep = qn90b_commands.add_parser("uep")
     add_root_options(qn90b_uep, QN90B_PAYLOAD_DIRECTORY)
-    qn90b_uep.add_argument("action", choices=("status", "disable"))
+    qn90b_uep.add_argument("action", choices=("status", "disable"), nargs="?")
     qn90b_uep.set_defaults(handler=command_qn90b_uep)
 
     qn90f = commands.add_parser("qn90f")
@@ -715,7 +801,7 @@ def build_parser() -> argparse.ArgumentParser:
     qn90f_root.set_defaults(handler=command_qn90f_root)
     qn90f_uep = qn90f_commands.add_parser("uep")
     add_root_options(qn90f_uep, QN90F_PAYLOAD_DIRECTORY)
-    qn90f_uep.add_argument("action", choices=("status", "disable"))
+    qn90f_uep.add_argument("action", choices=("status", "disable"), nargs="?")
     qn90f_uep.set_defaults(handler=command_qn90f_uep)
     qn90f_serve = qn90f_commands.add_parser("serve")
     add_serve_arguments(qn90f_serve)

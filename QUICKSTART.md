@@ -23,8 +23,11 @@ Extract the matching release and run:
 ./samsung-tv-root doctor
 ```
 
-Use `samsung-tv-root.exe` on Windows. Supply an unusual Tizen Studio location
-with `--sdb /path/to/tizen-studio/tools/sdb`.
+The examples below use `./samsung-tv-root` on Linux and macOS. On Windows, run
+the same arguments with `samsung-tv-root.exe`. Release archives contain the TV
+payloads; they do not require a local payload build. Put an unusual Tizen Studio
+location before the command, for example
+`./samsung-tv-root --sdb /path/to/sdb doctor`.
 
 To run from source instead of a standalone release:
 
@@ -34,11 +37,46 @@ python -m venv .venv
 .venv/bin/python -m samsung_tv_root doctor
 ```
 
-On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. Preflight needs only
-Python and `sdb`; root commands additionally require the .NET 6 SDK and one
-`make payloads` build.
+On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. When running from a
+source checkout, preflight needs only Python and `sdb`; root commands also
+require the .NET 6 SDK and one `make payloads` build.
 
-## 4. Verify and root the TV
+## 4. Save the TV profile
+
+Create the configuration, then edit the file path printed by `config init`:
+
+```console
+./samsung-tv-root config init
+./samsung-tv-root config check
+```
+
+The default file is `%APPDATA%\samsung-tv-root\config.toml` on Windows,
+`~/Library/Application Support/samsung-tv-root/config.toml` on macOS, and
+`$XDG_CONFIG_HOME/samsung-tv-root/config.toml` on Linux when
+`XDG_CONFIG_HOME` is set, otherwise `~/.config/samsung-tv-root/config.toml`.
+
+The generated `televisions.my-tv` table is a named profile. With one configured
+QN90F profile, the model-specific commands infer it. Use `--profile NAME` when
+more than one configured TV has the same model. A nonstandard Tizen Studio
+installation can be saved as a top-level `sdb = "C:/path/to/sdb.exe"` value.
+
+## 5. Verify and root the TV
+
+Using the saved profile:
+
+```console
+./samsung-tv-root preflight qn90f
+./samsung-tv-root qn90f root
+```
+
+On Windows, the exact commands are:
+
+```bat
+samsung-tv-root.exe preflight qn90f
+samsung-tv-root.exe qn90f root
+```
+
+An explicit address remains supported:
 
 ```console
 ./samsung-tv-root preflight qn90f 192.0.2.50
@@ -49,13 +87,11 @@ Use `qn90b` for the 2022 PontusM platform. Preflight reports `tested`,
 `compatible-untested`, or `incompatible`. Successful root acquisition includes
 verification that temporary kernel state was restored.
 
-## 5. Keep root available
+## 6. Keep root available
 
-Create and edit the default configuration:
+Run the controller with the same configuration:
 
 ```console
-./samsung-tv-root config init
-./samsung-tv-root config check
 ./samsung-tv-root daemon run
 ```
 
@@ -70,5 +106,6 @@ The host controller reacquires volatile root after TV lifecycle events. It does
 not install persistence on the TV. Remote observation and remapping remain off
 until devices and rules are explicitly configured.
 
-Further details are in [Controller](docs/CONTROLLER.md),
-[Remote input](docs/REMOTE_POLICY.md), and the model reproduction documents.
+Further end-user details are in the [controller](docs/user/CONTROLLER.md) and
+[remote input](docs/user/REMOTE_POLICY.md) guides. Implementation and reversing
+records are listed separately in the [documentation index](docs/README.md).
