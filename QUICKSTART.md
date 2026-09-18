@@ -104,7 +104,8 @@ On Linux, the optional host service is:
 
 The host controller reacquires volatile root after TV lifecycle events. It does
 not install persistence on the TV. Remote observation and remapping remain off
-until devices and rules are explicitly configured.
+until devices and rules are explicitly configured. Native TV event collection
+also remains off until `events.enabled = true` is set for that TV.
 
 Further end-user details are in the [controller](docs/user/CONTROLLER.md) and
 [remote input](docs/user/REMOTE_POLICY.md) guides. Implementation and reversing

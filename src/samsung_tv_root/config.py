@@ -61,6 +61,12 @@ class RemoteConfiguration:
 
 
 @dataclass(frozen=True)
+class NativeEventsConfiguration:
+    enabled: bool = False
+    hdmi_receiver: bool = False
+
+
+@dataclass(frozen=True)
 class TelevisionConfiguration:
     name: str
     model: str
@@ -69,6 +75,7 @@ class TelevisionConfiguration:
     root_on_presence: bool
     disable_native_execution_policy: bool
     remote: RemoteConfiguration
+    events: NativeEventsConfiguration = NativeEventsConfiguration()
 
 
 @dataclass(frozen=True)
@@ -151,6 +158,10 @@ disable_native_execution_policy = false
 enabled = false
 devices = []
 rules = []
+
+[televisions.my-tv.events]
+enabled = false
+hdmi_receiver = false
 """
 
 
@@ -167,6 +178,7 @@ def _parse_television(name: object, value: object) -> TelevisionConfiguration:
             "root_on_presence",
             "disable_native_execution_policy",
             "remote",
+            "events",
         },
         f"televisions.{name}",
     )
@@ -201,7 +213,33 @@ def _parse_television(name: object, value: object) -> TelevisionConfiguration:
             f"televisions.{name}.disable_native_execution_policy",
         ),
         remote=_parse_remote(name, table.get("remote")),
+        events=_parse_native_events(name, table.get("events")),
     )
+
+
+def _parse_native_events(
+    television_name: str,
+    value: object,
+) -> NativeEventsConfiguration:
+    table = _optional_table(value, f"televisions.{television_name}.events")
+    _reject_unknown(
+        table,
+        {"enabled", "hdmi_receiver"},
+        f"televisions.{television_name}.events",
+    )
+    enabled = _boolean(
+        table.get("enabled", False),
+        f"televisions.{television_name}.events.enabled",
+    )
+    hdmi_receiver = _boolean(
+        table.get("hdmi_receiver", False),
+        f"televisions.{television_name}.events.hdmi_receiver",
+    )
+    if hdmi_receiver and not enabled:
+        raise ConfigurationError(
+            f"televisions.{television_name}.events.hdmi_receiver requires events.enabled"
+        )
+    return NativeEventsConfiguration(enabled=enabled, hdmi_receiver=hdmi_receiver)
 
 
 def _parse_remote(television_name: str, value: object) -> RemoteConfiguration:

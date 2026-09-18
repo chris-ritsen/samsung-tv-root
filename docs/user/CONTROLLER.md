@@ -43,6 +43,10 @@ disable_native_execution_policy = false
 enabled = false
 devices = []
 rules = []
+
+[televisions.my-tv.events]
+enabled = false
+hdmi_receiver = false
 ```
 
 Add another table under `televisions` for another TV. `device_id` may contain
@@ -80,6 +84,7 @@ The acquisition sequence is:
 4. Accept an authenticated root-agent callback only from the configured TV.
 5. Confirm UID and GID 0 before publishing `rooted`.
 6. Start explicitly configured remote input sessions.
+7. Start the native event callback only when `events.enabled = true`.
 
 The root connection is monitored directly. If it closes while the same TV boot
 is still present, the controller uses the finite retry delays from the
@@ -122,6 +127,8 @@ samsung-tv-root execute my-tv 'id'
 samsung-tv-root source current my-tv
 samsung-tv-root source select my-tv HDMI1
 samsung-tv-root local-dimming status my-tv
+samsung-tv-root display status my-tv
+samsung-tv-root volume status my-tv
 ```
 
 Machine-readable responses use `--output json` before the command.
@@ -135,3 +142,65 @@ Capability records distinguish four states:
 - `proven_not_packaged`: validated on that model outside this public adapter.
 - `not_investigated`: no validated conclusion for that model.
 - `unsupported`: evidence proves the model cannot provide the operation.
+
+## Native events
+
+Native event collection is off by default. To publish foreground app, source,
+lifecycle, and speaker-volume changes through the authenticated control API:
+
+```toml
+[televisions.my-tv.events]
+enabled = true
+hdmi_receiver = false
+```
+
+Restart the host controller after changing the configuration, then run:
+
+```console
+samsung-tv-root events status my-tv
+samsung-tv-root events watch my-tv
+```
+
+Set `hdmi_receiver = true` only when kernel HDMI receiver diagnostics are
+needed. It adds a filtered `dmesg -w` monitor; it does not open, probe, or copy
+live HDMI video devices. The TV-side event agent is tied to the authenticated
+host connection, has no restart loop, and exits with its child monitors when
+that connection closes.
+
+## Volume, screenshots, and overlays
+
+Volume writes are range-checked and confirmed by native readback:
+
+```console
+samsung-tv-root volume status my-tv
+samsung-tv-root volume set my-tv 20
+```
+
+QN90F can export the retained 960x540 analysis frame as a PNG. This path does
+not start a live GStreamer capture, but the retained frame has no producer
+timestamp and may be stale. Existing files are not replaced unless `--force`
+is given:
+
+```console
+samsung-tv-root screenshot my-tv frame.png
+```
+
+QN90F overlays are visible, bounded to 1 through 290 seconds, and removed when
+the helper exits:
+
+```console
+samsung-tv-root overlay message my-tv 'Input changed' --seconds 5
+samsung-tv-root overlay scene my-tv scene.json --seconds 10
+```
+
+A scene is a JSON object with an `objects` array. This example uses the native
+1920x1080 canvas:
+
+```json
+{
+  "objects": [
+    {"type": "rectangle", "x": 72, "y": 72, "width": 900, "height": 150, "color": "#101010DD"},
+    {"type": "text", "x": 110, "y": 120, "text": "Input changed", "size": 48, "color": "#FFFFFFFF"}
+  ]
+}
+```

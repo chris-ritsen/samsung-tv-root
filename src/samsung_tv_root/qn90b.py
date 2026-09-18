@@ -38,9 +38,17 @@ REMOTE_INPUT_AGENT = REMOTE_DIRECTORY / "SamsungTvRemoteInputAgent.dll"
 REMOTE_INPUT_AGENT_RUNTIME_CONFIG = (
     REMOTE_DIRECTORY / "SamsungTvRemoteInputAgent.runtimeconfig.json"
 )
+REMOTE_EVENT_AGENT = REMOTE_DIRECTORY / "SamsungTvEventAgent.dll"
+REMOTE_EVENT_AGENT_RUNTIME_CONFIG = (
+    REMOTE_DIRECTORY / "SamsungTvEventAgent.runtimeconfig.json"
+)
 REMOTE_SOURCE_CONTROL = REMOTE_DIRECTORY / "Qn90bSourceControl.dll"
 REMOTE_SOURCE_CONTROL_RUNTIME_CONFIG = (
     REMOTE_DIRECTORY / "Qn90bSourceControl.runtimeconfig.json"
+)
+REMOTE_DISPLAY_CONTROL = REMOTE_DIRECTORY / "Qn90bDisplayControl.dll"
+REMOTE_DISPLAY_CONTROL_RUNTIME_CONFIG = (
+    REMOTE_DIRECTORY / "Qn90bDisplayControl.runtimeconfig.json"
 )
 SCAN_START = "0x20000000"
 SCAN_LENGTH = "0x4a000000"
@@ -129,8 +137,12 @@ class Qn90bRootExploit:
             "SamsungTvRootAgent.runtimeconfig.json": REMOTE_AGENT_RUNTIME_CONFIG,
             "SamsungTvRemoteInputAgent.dll": REMOTE_INPUT_AGENT,
             "SamsungTvRemoteInputAgent.runtimeconfig.json": REMOTE_INPUT_AGENT_RUNTIME_CONFIG,
+            "SamsungTvEventAgent.dll": REMOTE_EVENT_AGENT,
+            "SamsungTvEventAgent.runtimeconfig.json": REMOTE_EVENT_AGENT_RUNTIME_CONFIG,
             "Qn90bSourceControl.dll": REMOTE_SOURCE_CONTROL,
             "Qn90bSourceControl.runtimeconfig.json": REMOTE_SOURCE_CONTROL_RUNTIME_CONFIG,
+            "Qn90bDisplayControl.dll": REMOTE_DISPLAY_CONTROL,
+            "Qn90bDisplayControl.runtimeconfig.json": REMOTE_DISPLAY_CONTROL_RUNTIME_CONFIG,
         }
         missing = tuple(
             name for name in required if not (self.payload_directory / name).is_file()

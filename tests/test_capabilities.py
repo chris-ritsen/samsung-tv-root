@@ -20,9 +20,9 @@ def test_qn90b_inventory_distinguishes_implementation_gaps() -> None:
     assert states["source.select"] == "implemented"
     assert states["local_dimming.toggle"] == "implemented"
     assert states["hdmi_policy.enforce"] == "not_investigated"
-    assert states["display.picture_off"] == "proven_not_packaged"
+    assert states["display.picture_off"] == "implemented"
     assert states["screenshot.hdmi_960x540"] == "not_investigated"
-    assert states["volume.status"] == "proven_not_packaged"
+    assert states["volume.status"] == "implemented"
     assert all(state != "unavailable" for state in states.values())
     assert all(
         state in {capability_state.value for capability_state in CapabilityState}
@@ -34,9 +34,9 @@ def test_qn90f_inventory_reports_known_non_packaged_capabilities() -> None:
     inventory = TelevisionCapabilities(television("qn90f")).inventory()
     states = {item["name"]: item["state"] for item in inventory}
     assert states["hdmi_policy.enforce"] == "implemented"
-    assert states["screenshot.hdmi_960x540"] == "proven_not_packaged"
-    assert states["overlay.graphics"] == "proven_not_packaged"
-    assert states["volume.status"] == "proven_not_packaged"
+    assert states["screenshot.hdmi_960x540"] == "implemented"
+    assert states["overlay.graphics"] == "implemented"
+    assert states["volume.status"] == "implemented"
     assert all(state != "unavailable" for state in states.values())
 
 
@@ -47,3 +47,5 @@ def test_inventory_includes_daemon_and_remote_capabilities() -> None:
     assert states["uep.disable"] == "implemented"
     assert states["remote.observe"] == "implemented"
     assert states["remote.filter"] == "implemented"
+    assert states["volume.events"] == "implemented"
+    assert states["events.tv_state"] == "implemented"

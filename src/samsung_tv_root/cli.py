@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import os
 import re
+import secrets
 import shlex
 import sys
 from pathlib import Path, PurePosixPath
@@ -13,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from . import __version__
 from .compatibility import QN90F_PROFILE, TargetAssessment, TargetCompatibilityError
 from .capabilities import CapabilityError
+from .capture import CaptureError, encode_png
 from .config import (
     ApplicationConfiguration,
     ConfigurationError,
@@ -257,6 +261,21 @@ def command_controller_request(arguments: argparse.Namespace) -> int:
         request["source"] = arguments.source
     if arguments.controller_action == "local_dimming.set":
         request["enabled"] = arguments.state == "enabled"
+    if arguments.controller_action == "volume.set":
+        request["level"] = arguments.level
+    if arguments.controller_action == "overlay.graphics":
+        request["seconds"] = arguments.seconds
+        if getattr(arguments, "message", None) is not None:
+            request["message"] = arguments.message
+        else:
+            try:
+                request["scene"] = json.loads(
+                    arguments.scene.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as error:
+                raise CommandError(
+                    f"cannot read overlay scene {arguments.scene}: {error}"
+                ) from error
     response = asyncio.run(
         send_control_request(
             arguments.control_file.expanduser().resolve(),
@@ -269,12 +288,88 @@ def command_controller_request(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def command_remote_events(arguments: argparse.Namespace) -> int:
+def command_screenshot(arguments: argparse.Namespace) -> int:
+    output_path = arguments.path.expanduser().resolve()
+    if output_path.exists() and not arguments.force:
+        raise CommandError(
+            f"output already exists: {output_path}; use --force to replace it"
+        )
+    response = asyncio.run(
+        send_control_request(
+            arguments.control_file.expanduser().resolve(),
+            {
+                "action": "screenshot.hdmi_960x540",
+                "television": arguments.television,
+            },
+            timeout=arguments.timeout,
+        )
+    )
+    capture = response.get("capture")
+    encoded = response.get("rgb_base64")
+    if not isinstance(capture, dict) or not isinstance(encoded, str):
+        raise CommandError("root controller returned an invalid screenshot response")
+    try:
+        rgb = base64.b64decode(encoded, validate=True)
+        width = int(capture["width"])
+        height = int(capture["height"])
+    except (binascii.Error, KeyError, TypeError, ValueError) as error:
+        raise CommandError("root controller returned invalid screenshot data") from error
+    try:
+        png = encode_png(rgb, width, height)
+    except CaptureError as error:
+        raise CommandError(str(error)) from error
+    _write_output_file(output_path, png, force=arguments.force)
+    emit(
+        {
+            "television": arguments.television,
+            "path": str(output_path),
+            "capture": capture,
+        },
+        arguments.output,
+    )
+    return 0
+
+
+def _write_output_file(path: Path, data: bytes, *, force: bool) -> None:
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        with temporary.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if force:
+            os.replace(temporary, path)
+            return
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise CommandError(
+                f"output already exists: {path}; use --force to replace it"
+            ) from error
+        temporary.unlink()
+    except CommandError:
+        raise
+    except OSError as error:
+        raise CommandError(f"cannot write screenshot {path}: {error}") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def command_event_stream(arguments: argparse.Namespace) -> int:
     async def stream() -> None:
-        topic = f"television.{arguments.television}.remote"
+        topics = tuple(
+            f"television.{arguments.television}.{suffix}"
+            for suffix in arguments.event_topics
+        )
         async for event in stream_control_events(
             arguments.control_file.expanduser().resolve(),
-            (topic,),
+            topics,
             arguments.timeout,
         ):
             emit(event, arguments.output)
@@ -738,6 +833,69 @@ def build_parser() -> argparse.ArgumentParser:
             controller_action=action,
         )
 
+    volume = commands.add_parser("volume")
+    volume_commands = volume.add_subparsers(dest="volume_command", required=True)
+    volume_status = volume_commands.add_parser("status")
+    volume_status.add_argument("television")
+    volume_status.add_argument("--timeout", type=float, default=20.0)
+    volume_status.set_defaults(
+        handler=command_controller_request,
+        controller_action="volume.status",
+    )
+    volume_set = volume_commands.add_parser("set")
+    volume_set.add_argument("television")
+    volume_set.add_argument("level", type=int)
+    volume_set.add_argument("--timeout", type=float, default=20.0)
+    volume_set.set_defaults(
+        handler=command_controller_request,
+        controller_action="volume.set",
+    )
+
+    screenshot = commands.add_parser("screenshot")
+    screenshot.add_argument("television")
+    screenshot.add_argument("path", type=Path)
+    screenshot.add_argument("--force", action="store_true")
+    screenshot.add_argument("--timeout", type=float, default=30.0)
+    screenshot.set_defaults(handler=command_screenshot)
+
+    overlay = commands.add_parser("overlay")
+    overlay_commands = overlay.add_subparsers(dest="overlay_command", required=True)
+    overlay_message = overlay_commands.add_parser("message")
+    overlay_message.add_argument("television")
+    overlay_message.add_argument("message")
+    overlay_message.add_argument("--seconds", type=int, default=5)
+    overlay_message.add_argument("--timeout", type=float, default=320.0)
+    overlay_message.set_defaults(
+        handler=command_controller_request,
+        controller_action="overlay.graphics",
+    )
+    overlay_scene = overlay_commands.add_parser("scene")
+    overlay_scene.add_argument("television")
+    overlay_scene.add_argument("scene", type=Path)
+    overlay_scene.add_argument("--seconds", type=int, default=5)
+    overlay_scene.add_argument("--timeout", type=float, default=320.0)
+    overlay_scene.set_defaults(
+        handler=command_controller_request,
+        controller_action="overlay.graphics",
+    )
+
+    events = commands.add_parser("events")
+    events_commands = events.add_subparsers(dest="events_command", required=True)
+    events_status = events_commands.add_parser("status")
+    events_status.add_argument("television")
+    events_status.add_argument("--timeout", type=float, default=10.0)
+    events_status.set_defaults(
+        handler=command_controller_request,
+        controller_action="events.status",
+    )
+    events_watch = events_commands.add_parser("watch")
+    events_watch.add_argument("television")
+    events_watch.add_argument("--timeout", type=float, default=10.0)
+    events_watch.set_defaults(
+        handler=command_event_stream,
+        event_topics=("native", "state", "volume"),
+    )
+
     remote = commands.add_parser("remote")
     remote_commands = remote.add_subparsers(dest="remote_command", required=True)
     remote_status = remote_commands.add_parser("status")
@@ -757,7 +915,10 @@ def build_parser() -> argparse.ArgumentParser:
     remote_events = remote_commands.add_parser("events")
     remote_events.add_argument("television")
     remote_events.add_argument("--timeout", type=float, default=10.0)
-    remote_events.set_defaults(handler=command_remote_events)
+    remote_events.set_defaults(
+        handler=command_event_stream,
+        event_topics=("remote",),
+    )
 
     preflight = commands.add_parser("preflight")
     preflight.add_argument("tv", choices=("qn90b", "qn90f"))

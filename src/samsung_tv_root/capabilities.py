@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-import json
-import shlex
+import base64
 from enum import Enum
 from typing import Any
 
 from .config import TelevisionConfiguration
+from .capture import CaptureError, Qn90fCaptureControl
+from .display import (
+    DisplayControlError,
+    Qn90bDisplayControl,
+    Qn90fDisplayControl,
+)
 from .local_dimming import (
     LocalDimmingControlError,
     LocalDimmingModeStore,
@@ -13,17 +18,14 @@ from .local_dimming import (
     default_local_dimming_state_path,
 )
 from .root_agent import RootAgentConnection
+from .overlay import OverlayError, Qn90fOverlayControl
 from .source import (
     HdmiInput,
     Qn90bSourceControl,
     Qn90fSourceControl,
     SourceControlError,
 )
-
-
-QN90F_DISPLAY_CONTROL = (
-    "/home/owner/share/tmp/sdk_tools/qn90f-probe/Qn90fDisplayControl.dll"
-)
+from .volume import SamsungTvVolumeControl, VolumeControlError
 
 
 class CapabilityError(RuntimeError):
@@ -51,10 +53,18 @@ SHARED_IMPLEMENTED_CAPABILITIES = (
     "remote.devices",
     "remote.observe",
     "remote.filter",
+    "volume.status",
+    "volume.set",
+    "volume.events",
+    "events.tv_state",
 )
 
 MODEL_ACTION_CAPABILITIES = {
-    "qn90b": (),
+    "qn90b": (
+        "display.status",
+        "display.picture_off",
+        "display.wake",
+    ),
     "qn90f": (
         "source.recover",
         "hdmi_policy.status",
@@ -63,27 +73,12 @@ MODEL_ACTION_CAPABILITIES = {
         "display.status",
         "display.picture_off",
         "display.wake",
+        "screenshot.hdmi_960x540",
+        "overlay.graphics",
     ),
 }
 
-SHARED_CAPABILITY_GAPS = {
-    "volume.status": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native speaker-volume reads were validated, but this public adapter is not packaged here.",
-    ),
-    "volume.set": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native speaker-volume writes were validated, but this public adapter is not packaged here.",
-    ),
-    "volume.events": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native speaker-volume change events were validated, but this public adapter is not packaged here.",
-    ),
-    "events.tv_state": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Foreground app, source, lifecycle, and HDMI receiver events were validated, but this public adapter is not packaged here.",
-    ),
-}
+SHARED_CAPABILITY_GAPS: dict[str, tuple[CapabilityState, str]] = {}
 
 QN90B_CAPABILITY_GAPS = {
     "source.recover": (
@@ -102,18 +97,6 @@ QN90B_CAPABILITY_GAPS = {
         CapabilityState.NOT_INVESTIGATED,
         "The QN90B active video-policy interface has not been validated.",
     ),
-    "display.status": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native QN90B display-state reads were validated in the operational controller, but this adapter is not packaged here.",
-    ),
-    "display.picture_off": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native QN90B Picture Off was validated in the operational controller, but this adapter is not packaged here.",
-    ),
-    "display.wake": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Native QN90B display wake was validated in the operational controller, but this adapter is not packaged here.",
-    ),
     "screenshot.hdmi_960x540": (
         CapabilityState.NOT_INVESTIGATED,
         "This project has not validated the retained-analysis HDMI capture path on QN90B.",
@@ -124,16 +107,7 @@ QN90B_CAPABILITY_GAPS = {
     ),
 }
 
-QN90F_CAPABILITY_GAPS = {
-    "screenshot.hdmi_960x540": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Processed 960x540 HDMI capture was validated on QN90F, but this public adapter is not packaged here.",
-    ),
-    "overlay.graphics": (
-        CapabilityState.PROVEN_NOT_PACKAGED,
-        "Transparent text and graphics overlays were validated on QN90F, but this public adapter is not packaged here.",
-    ),
-}
+QN90F_CAPABILITY_GAPS: dict[str, tuple[CapabilityState, str]] = {}
 
 
 class TelevisionCapabilities:
@@ -141,14 +115,21 @@ class TelevisionCapabilities:
         self.configuration = configuration
         if configuration.model == "qn90f":
             self.source = Qn90fSourceControl()
+            self.display = Qn90fDisplayControl()
+            self.capture = Qn90fCaptureControl(self.source)
+            self.overlay = Qn90fOverlayControl()
         elif configuration.model == "qn90b":
             self.source = Qn90bSourceControl()
+            self.display = Qn90bDisplayControl()
+            self.capture = None
+            self.overlay = None
         else:
             raise CapabilityError(f"unsupported model: {configuration.model}")
         store = LocalDimmingModeStore(
             default_local_dimming_state_path(configuration.name)
         )
         self.local_dimming = SamsungTvLocalDimmingControl(store)
+        self.volume = SamsungTvVolumeControl()
 
     def names(self) -> tuple[str, ...]:
         shared_actions = (
@@ -158,6 +139,8 @@ class TelevisionCapabilities:
             "local_dimming.status",
             "local_dimming.set",
             "local_dimming.toggle",
+            "volume.status",
+            "volume.set",
         )
         return shared_actions + MODEL_ACTION_CAPABILITIES[self.configuration.model]
 
@@ -193,7 +176,14 @@ class TelevisionCapabilities:
     ) -> dict[str, Any]:
         try:
             return await self._handle(connection, action, request)
-        except (SourceControlError, LocalDimmingControlError) as error:
+        except (
+            CaptureError,
+            DisplayControlError,
+            LocalDimmingControlError,
+            OverlayError,
+            SourceControlError,
+            VolumeControlError,
+        ) as error:
             raise CapabilityError(str(error)) from error
 
     async def _handle(
@@ -250,6 +240,12 @@ class TelevisionCapabilities:
             return {"video_policy": video.to_dict()}
         if action.startswith("local_dimming."):
             return await self._local_dimming(connection, action, request)
+        if action == "volume.status":
+            return {"volume": (await self.volume.get(connection)).to_dict()}
+        if action == "volume.set":
+            level = request.get("level")
+            change = await self.volume.set(connection, level)
+            return {"volume": change.to_dict()}
         if action.startswith("display."):
             self._require(action)
             operation = {
@@ -259,7 +255,31 @@ class TelevisionCapabilities:
             }.get(action)
             if operation is None:
                 raise CapabilityError(f"unknown display action: {action}")
-            return {"display": await self._display(connection, operation)}
+            return {"display": await self.display.run(connection, operation)}
+        if action == "screenshot.hdmi_960x540":
+            self._require(action)
+            if self.capture is None:
+                raise CapabilityError("capture adapter is unavailable")
+            capture = await self.capture.capture(connection, 10.0)
+            return {
+                "capture": capture.metadata(),
+                "rgb_base64": base64.b64encode(capture.rgb).decode("ascii"),
+            }
+        if action == "overlay.graphics":
+            self._require(action)
+            if self.overlay is None:
+                raise CapabilityError("overlay adapter is unavailable")
+            seconds = request.get("seconds", 5)
+            message = request.get("message")
+            scene = request.get("scene")
+            return {
+                "overlay": await self.overlay.show(
+                    connection,
+                    seconds=seconds,
+                    message=message,
+                    scene=scene,
+                )
+            }
         raise CapabilityError(f"unknown capability action: {action}")
 
     async def _local_dimming(
@@ -323,31 +343,6 @@ class TelevisionCapabilities:
         if index < 0:
             raise CapabilityError(f"{source.value} has no MBR activity index")
         return index
-
-    async def _display(
-        self,
-        connection: RootAgentConnection,
-        operation: str,
-    ) -> dict[str, Any]:
-        command = shlex.join(("/usr/bin/dotnet", QN90F_DISPLAY_CONTROL, operation))
-        result = await connection.execute(command, 5.0)
-        if result.timed_out:
-            raise CapabilityError(f"display {operation} timed out")
-        if result.exit_code != 0:
-            detail = result.stderr.strip() or result.stdout.strip()
-            raise CapabilityError(
-                f"display {operation} failed with exit {result.exit_code}"
-                + (f": {detail}" if detail else "")
-            )
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise CapabilityError(
-                f"display {operation} returned invalid JSON"
-            ) from error
-        if not isinstance(payload, dict):
-            raise CapabilityError(f"display {operation} result is not an object")
-        return payload
 
     def _require(self, action: str) -> None:
         if action not in self.names():

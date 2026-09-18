@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 from pathlib import Path
 
@@ -158,6 +160,111 @@ def test_direct_target_rejects_wrong_model_and_explicit_host(tmp_path) -> None:
         cli.resolve_direct_target(wrong_model, "qn90f")
     with pytest.raises(cli.CommandError, match="either HOST or --profile"):
         cli.resolve_direct_target(explicit_host, "qn90f")
+
+
+def test_volume_set_sends_level_to_controller(monkeypatch, capsys) -> None:
+    arguments = cli.build_parser().parse_args(["volume", "set", "my-tv", "23"])
+    observed: dict[str, object] = {}
+
+    async def send(path, request, timeout):
+        observed.update({"request": request, "timeout": timeout})
+        return {"ok": True, "volume": {"target": 23}}
+
+    monkeypatch.setattr(cli, "send_control_request", send)
+
+    assert arguments.handler(arguments) == 0
+    assert observed == {
+        "request": {"action": "volume.set", "television": "my-tv", "level": 23},
+        "timeout": 20.0,
+    }
+    assert "target: 23" in capsys.readouterr().out
+
+
+def test_overlay_scene_loads_json_for_controller(monkeypatch, tmp_path) -> None:
+    scene = tmp_path / "scene.json"
+    scene.write_text('{"objects":[{"type":"rectangle"}]}', encoding="utf-8")
+    arguments = cli.build_parser().parse_args(
+        ["overlay", "scene", "my-tv", str(scene), "--seconds", "7"]
+    )
+    observed: dict[str, object] = {}
+
+    async def send(path, request, timeout):
+        observed.update({"request": request, "timeout": timeout})
+        return {"ok": True, "overlay": {"completion_reason": "timer"}}
+
+    monkeypatch.setattr(cli, "send_control_request", send)
+
+    assert arguments.handler(arguments) == 0
+    assert observed["request"] == {
+        "action": "overlay.graphics",
+        "television": "my-tv",
+        "seconds": 7,
+        "scene": {"objects": [{"type": "rectangle"}]},
+    }
+
+
+def test_screenshot_writes_png_and_omits_raw_rgb(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    output = tmp_path / "frame.png"
+    arguments = cli.build_parser().parse_args(
+        ["-o", "json", "screenshot", "my-tv", str(output)]
+    )
+
+    async def send(path, request, timeout):
+        return {
+            "ok": True,
+            "television": "my-tv",
+            "capture": {"width": 1, "height": 1, "sha256": "source-hash"},
+            "rgb_base64": base64.b64encode(b"\xff\x00\x00").decode("ascii"),
+        }
+
+    monkeypatch.setattr(cli, "send_control_request", send)
+
+    assert arguments.handler(arguments) == 0
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["path"] == str(output)
+    assert "rgb_base64" not in rendered
+
+
+def test_screenshot_refuses_to_replace_existing_file(monkeypatch, tmp_path) -> None:
+    output = tmp_path / "frame.png"
+    output.write_bytes(b"existing")
+    arguments = cli.build_parser().parse_args(["screenshot", "my-tv", str(output)])
+
+    async def send(path, request, timeout):
+        raise AssertionError("an existing output must be rejected before capture")
+
+    monkeypatch.setattr(cli, "send_control_request", send)
+
+    with pytest.raises(cli.CommandError, match="already exists"):
+        arguments.handler(arguments)
+
+    assert output.read_bytes() == b"existing"
+
+
+def test_events_watch_subscribes_to_native_state_and_volume(monkeypatch) -> None:
+    arguments = cli.build_parser().parse_args(["events", "watch", "my-tv"])
+    observed: dict[str, object] = {}
+
+    async def stream(path, topics, timeout):
+        observed.update({"topics": topics, "timeout": timeout})
+        yield {"event": True, "topic": topics[0]}
+
+    monkeypatch.setattr(cli, "stream_control_events", stream)
+
+    assert arguments.handler(arguments) == 0
+    assert observed == {
+        "topics": (
+            "television.my-tv.native",
+            "television.my-tv.state",
+            "television.my-tv.volume",
+        ),
+        "timeout": 10.0,
+    }
 
 
 def test_uep_action_can_be_used_without_host() -> None:

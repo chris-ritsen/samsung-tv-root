@@ -15,6 +15,7 @@ from .control_api import ControlApiServer, EventBroker
 from .controller import default_control_file
 from .discovery import PresenceEvent, SsdpPresenceDiscovery
 from .lifecycle import RootLifecycle
+from .native_events import NativeEventCoordinator
 from .remote import RemoteInputCoordinator, list_input_devices
 from .systemd_notify import ready, status, stopping
 
@@ -46,6 +47,13 @@ class SamsungTvRootDaemon:
                 self._publish_event,
                 self.capabilities[television.name].handle,
                 configuration.retry.delays,
+            )
+            for television in configuration.televisions
+        }
+        self.native_events = {
+            television.name: NativeEventCoordinator(
+                television,
+                self._publish_event,
             )
             for television in configuration.televisions
         }
@@ -105,6 +113,8 @@ class SamsungTvRootDaemon:
             stopping("Closing Samsung TV controllers")
             if self.discovery is not None:
                 await self.discovery.close()
+            for coordinator in self.native_events.values():
+                await coordinator.close()
             for remote in self.remotes.values():
                 await remote.close()
             for lifecycle in self.lifecycles.values():
@@ -126,6 +136,10 @@ class SamsungTvRootDaemon:
                     name: remote.snapshot()
                     for name, remote in sorted(self.remotes.items())
                 },
+                "native_events": {
+                    name: coordinator.snapshot()
+                    for name, coordinator in sorted(self.native_events.items())
+                },
             }
         television_name = request.get("television")
         if not isinstance(television_name, str):
@@ -143,6 +157,11 @@ class SamsungTvRootDaemon:
             return {
                 "television": television_name,
                 "remote_input": self.remotes[television_name].snapshot(),
+            }
+        if action == "events.status":
+            return {
+                "television": television_name,
+                "native_events": self.native_events[television_name].snapshot(),
             }
         if action == "remote.devices":
             connection = await lifecycle.acquire_now()
@@ -211,6 +230,17 @@ class SamsungTvRootDaemon:
             except Exception as error:
                 self._publish_event(
                     f"television.{name}.remote",
+                    {
+                        "event": "activation-failed",
+                        "television": name,
+                        "error": f"{type(error).__name__}: {error}",
+                    },
+                )
+            try:
+                await self.native_events[name].reconcile(connection, lifecycle.host)
+            except Exception as error:
+                self._publish_event(
+                    f"television.{name}.native",
                     {
                         "event": "activation-failed",
                         "television": name,

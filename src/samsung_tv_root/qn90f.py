@@ -43,17 +43,18 @@ ROOT_ACQUISITION_PAYLOAD_FILES = (
     "SamsungTvRootAgent.runtimeconfig.json",
     "SamsungTvRemoteInputAgent.dll",
     "SamsungTvRemoteInputAgent.runtimeconfig.json",
+    "SamsungTvEventAgent.dll",
+    "SamsungTvEventAgent.runtimeconfig.json",
     "Qn90fSourceControl.dll",
     "Qn90fSourceControl.runtimeconfig.json",
     "Qn90fDisplayControl.dll",
     "Qn90fDisplayControl.runtimeconfig.json",
-)
-ROOT_CONTROLLER_PAYLOAD_FILES = ROOT_ACQUISITION_PAYLOAD_FILES + (
-    "Qn90fPicturePolicyEventAgent.dll",
-    "Qn90fPicturePolicyEventAgent.runtimeconfig.json",
     "Qn90fScreenAnalysisDump.dll",
     "Qn90fScreenAnalysisDump.runtimeconfig.json",
+    "Qn90fEflTextOverlayProbe.dll",
+    "Qn90fEflTextOverlayProbe.runtimeconfig.json",
 )
+ROOT_CONTROLLER_PAYLOAD_FILES = ROOT_ACQUISITION_PAYLOAD_FILES
 DEFAULT_PAYLOAD_DIRECTORY = payload_directory("qn90f")
 
 

@@ -18,10 +18,24 @@ def base_configuration() -> dict[str, object]:
 def test_remote_policy_is_inactive_by_default() -> None:
     configuration = parse_configuration(base_configuration())
     assert configuration.sdb is None
-    remote = configuration.television("living-room").remote
+    television = configuration.television("living-room")
+    remote = television.remote
     assert remote.enabled is False
     assert remote.devices == ()
     assert remote.rules == ()
+    assert television.events.enabled is False
+    assert television.events.hdmi_receiver is False
+
+
+def test_hdmi_event_monitor_requires_native_events() -> None:
+    value = base_configuration()
+    value["televisions"]["living-room"]["events"] = {
+        "enabled": False,
+        "hdmi_receiver": True,
+    }
+
+    with pytest.raises(ConfigurationError, match="requires events.enabled"):
+        parse_configuration(value)
 
 
 def test_optional_sdb_path_is_parsed() -> None:

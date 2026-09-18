@@ -20,10 +20,14 @@ common-payload:
 		--configuration Release --output "$(COMMON_OUT)"
 	$(DOTNET) build payloads/common/SamsungTvRemoteInputAgent.csproj \
 		--configuration Release --output "$(COMMON_OUT)"
+	$(DOTNET) build payloads/common/SamsungTvEventAgent.csproj \
+		--configuration Release --output "$(COMMON_OUT)"
 	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
 		"$(COMMON_OUT)/SamsungTvRootAgent.runtimeconfig.json"
 	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
 		"$(COMMON_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json"
+	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
+		"$(COMMON_OUT)/SamsungTvEventAgent.runtimeconfig.json"
 
 qn90b-payload: common-payload
 	rm -rf "$(QN90B_OUT)"
@@ -31,10 +35,14 @@ qn90b-payload: common-payload
 		--configuration Release --output "$(QN90B_OUT)"
 	$(DOTNET) build payloads/qn90b/Qn90bSourceControl.csproj \
 		--configuration Release --output "$(QN90B_OUT)"
+	$(DOTNET) build payloads/qn90b/Qn90bDisplayControl.csproj \
+		--configuration Release --output "$(QN90B_OUT)"
 	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
 		"$(QN90B_OUT)/FdetProbe.runtimeconfig.json"
 	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
 		"$(QN90B_OUT)/Qn90bSourceControl.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B_OUT)/Qn90bDisplayControl.runtimeconfig.json"
 	cp "$(COMMON_OUT)/SamsungTvRootAgent.dll" \
 		"$(QN90B_OUT)/SamsungTvRootAgent.dll"
 	cp "$(COMMON_OUT)/SamsungTvRootAgent.runtimeconfig.json" \
@@ -43,6 +51,10 @@ qn90b-payload: common-payload
 		"$(QN90B_OUT)/SamsungTvRemoteInputAgent.dll"
 	cp "$(COMMON_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json" \
 		"$(QN90B_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json"
+	cp "$(COMMON_OUT)/SamsungTvEventAgent.dll" \
+		"$(QN90B_OUT)/SamsungTvEventAgent.dll"
+	cp "$(COMMON_OUT)/SamsungTvEventAgent.runtimeconfig.json" \
+		"$(QN90B_OUT)/SamsungTvEventAgent.runtimeconfig.json"
 
 qn90f-payload: common-payload
 	rm -rf "$(QN90F_OUT)"
@@ -52,12 +64,20 @@ qn90f-payload: common-payload
 		--configuration Release --output "$(QN90F_OUT)"
 	$(DOTNET) build payloads/qn90f/Qn90fDisplayControl.csproj \
 		--configuration Release --output "$(QN90F_OUT)"
+	$(DOTNET) build payloads/qn90f/Qn90fScreenAnalysisDump.csproj \
+		--configuration Release --output "$(QN90F_OUT)"
+	$(DOTNET) build payloads/qn90f/Qn90fEflTextOverlayProbe.csproj \
+		--configuration Release --output "$(QN90F_OUT)"
 	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
 		"$(QN90F_OUT)/MaliPhysicalProbe.runtimeconfig.json"
 	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
 		"$(QN90F_OUT)/Qn90fSourceControl.runtimeconfig.json"
 	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
 		"$(QN90F_OUT)/Qn90fDisplayControl.runtimeconfig.json"
+	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
+		"$(QN90F_OUT)/Qn90fScreenAnalysisDump.runtimeconfig.json"
+	cp payloads/qn90f/MaliPhysicalProbe.runtimeconfig.json \
+		"$(QN90F_OUT)/Qn90fEflTextOverlayProbe.runtimeconfig.json"
 	cp "$(COMMON_OUT)/SamsungTvRootAgent.dll" \
 		"$(QN90F_OUT)/SamsungTvRootAgent.dll"
 	cp "$(COMMON_OUT)/SamsungTvRootAgent.runtimeconfig.json" \
@@ -66,6 +86,10 @@ qn90f-payload: common-payload
 		"$(QN90F_OUT)/SamsungTvRemoteInputAgent.dll"
 	cp "$(COMMON_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json" \
 		"$(QN90F_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json"
+	cp "$(COMMON_OUT)/SamsungTvEventAgent.dll" \
+		"$(QN90F_OUT)/SamsungTvEventAgent.dll"
+	cp "$(COMMON_OUT)/SamsungTvEventAgent.runtimeconfig.json" \
+		"$(QN90F_OUT)/SamsungTvEventAgent.runtimeconfig.json"
 
 swu-preloads:
 	rm -rf "$(SWU_OUT)"

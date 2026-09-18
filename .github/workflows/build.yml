@@ -61,12 +61,17 @@ jobs:
             payloads/qn90b/out/FdetProbe.dll \
             payloads/qn90b/out/SamsungTvRootAgent.dll \
             payloads/qn90b/out/SamsungTvRemoteInputAgent.dll \
+            payloads/qn90b/out/SamsungTvEventAgent.dll \
             payloads/qn90b/out/Qn90bSourceControl.dll \
+            payloads/qn90b/out/Qn90bDisplayControl.dll \
             payloads/qn90f/out/MaliPhysicalProbe.dll \
             payloads/qn90f/out/SamsungTvRootAgent.dll \
             payloads/qn90f/out/SamsungTvRemoteInputAgent.dll \
+            payloads/qn90f/out/SamsungTvEventAgent.dll \
             payloads/qn90f/out/Qn90fSourceControl.dll \
-            payloads/qn90f/out/Qn90fDisplayControl.dll; do
+            payloads/qn90f/out/Qn90fDisplayControl.dll \
+            payloads/qn90f/out/Qn90fScreenAnalysisDump.dll \
+            payloads/qn90f/out/Qn90fEflTextOverlayProbe.dll; do
             file "$assembly" | tee /dev/stderr | grep -q 'Mono/.Net assembly'
           done
           for preload in swu/out/*.so; do
@@ -75,12 +80,17 @@ jobs:
           python -m json.tool payloads/qn90b/out/FdetProbe.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/SamsungTvRootAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/SamsungTvRemoteInputAgent.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/qn90b/out/SamsungTvEventAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/Qn90bSourceControl.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/qn90b/out/Qn90bDisplayControl.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90f/out/MaliPhysicalProbe.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90f/out/SamsungTvRootAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90f/out/SamsungTvRemoteInputAgent.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/qn90f/out/SamsungTvEventAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90f/out/Qn90fSourceControl.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90f/out/Qn90fDisplayControl.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/qn90f/out/Qn90fScreenAnalysisDump.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/qn90f/out/Qn90fEflTextOverlayProbe.runtimeconfig.json >/dev/null
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tv-payloads

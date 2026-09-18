@@ -60,6 +60,8 @@ requirements instead of rejecting every build-number change.
 - Opt-in remote observation, suppression, remapping, and structured events.
 - HDMI source, local-dimming, PC/Game/Input Signal Plus, and Picture Off
   controls where listed as implemented below.
+- Speaker-volume control and opt-in native TV event streams.
+- QN90F retained-frame screenshots and bounded compositor overlays.
 - SWU firmware-key extraction for both tested models.
 
 Root and UEP changes remain volatile. The controller makes root appear
@@ -81,12 +83,12 @@ verified platform limitation; no row below currently makes that claim.
 | HDMI presentation recovery                               | `not_investigated`    | `implemented`         |
 | Local-dimming status, set, toggle                        | `implemented`         | `implemented`         |
 | PC mode, Game Mode, Input Signal Plus status/enforcement | `not_investigated`    | `implemented`         |
-| Picture Off, display status, display wake                | `proven_not_packaged` | `implemented`         |
+| Picture Off, display status, display wake                | `implemented`         | `implemented`         |
 | Remote input observation, filtering, TV-native actions   | `implemented`         | `implemented`         |
-| Speaker volume get/set and native change events          | `proven_not_packaged` | `proven_not_packaged` |
-| Foreground app, source, lifecycle, HDMI receiver events  | `proven_not_packaged` | `proven_not_packaged` |
-| Processed 960x540 HDMI capture                           | `not_investigated`    | `proven_not_packaged` |
-| Transparent text and graphics overlays                   | `not_investigated`    | `proven_not_packaged` |
+| Speaker volume get/set and native change events          | `implemented`         | `implemented`         |
+| Foreground app, source, lifecycle, HDMI receiver events  | `implemented`         | `implemented`         |
+| Processed 960x540 HDMI capture                           | `not_investigated`    | `implemented`         |
+| Transparent text and graphics overlays                   | `not_investigated`    | `implemented`         |
 
 The running controller exposes the machine-readable inventory:
 
@@ -305,7 +307,8 @@ the direct commands:
 ```
 
 Edit the generated TV name, model, and address. The daemon follows TV lifecycle
-events, acquires root, and starts the explicitly configured remote sessions.
+events, acquires root, and starts explicitly configured remote and native-event
+sessions.
 `my-tv` in the examples below is that user-chosen configuration name.
 
 On Linux with a systemd user manager, install the host service explicitly:
@@ -327,15 +330,24 @@ Once the controller is running:
 ./samsung-tv-root source list my-tv
 ./samsung-tv-root source select my-tv HDMI2
 ./samsung-tv-root local-dimming toggle my-tv
+./samsung-tv-root volume status my-tv
 ```
 
-QN90F also implements:
+Both models implement display status, Picture Off, and wake. QN90F also
+implements HDMI policy, retained-frame screenshots, and bounded overlays:
 
 ```console
 ./samsung-tv-root hdmi-policy enforce my-tv --source HDMI2
 ./samsung-tv-root display picture-off my-tv
 ./samsung-tv-root display wake my-tv
+./samsung-tv-root screenshot my-tv frame.png
+./samsung-tv-root overlay message my-tv 'Hello' --seconds 5
 ```
+
+Native TV events are disabled by default. Enable the profile's `events` table,
+restart the host controller, then use `events status` or `events watch`. The
+event agent has no restart policy or TV-side boot unit and exits when its
+authenticated host connection closes.
 
 See the [controller](docs/user/CONTROLLER.md) and
 [remote input](docs/user/REMOTE_POLICY.md) guides for configuration and
