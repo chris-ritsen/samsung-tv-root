@@ -12,6 +12,7 @@ internal static class SamsungTvRootAgent
     private const string ProtocolVersion = "SAMSUNG-TV-ROOT/1";
     private const string AllowedStagingRoot =
         "/home/owner/share/tmp/sdk_tools/";
+    private const string RuntimeRoot = "/run/samsung-tv-root";
     private const int ConnectTimeoutMilliseconds = 5000;
     private const int MaximumLineBytes = 4 * 1024 * 1024;
     private const int MaximumCommandBytes = 64 * 1024;
@@ -25,6 +26,7 @@ internal static class SamsungTvRootAgent
     public static int Main(string[] arguments)
     {
         byte[] secret = null;
+        string runtimeDirectory = null;
         try
         {
             if (arguments.Length != 4)
@@ -35,6 +37,7 @@ internal static class SamsungTvRootAgent
             string stagingDirectory = ValidateStagingDirectory(arguments[3]);
             statusPath = Path.Combine(stagingDirectory, "root-agent.status");
             WriteStatus("starting");
+            runtimeDirectory = PrepareRuntimeDirectory();
             int port;
             if (!int.TryParse(arguments[1], out port)
                 || port < 1
@@ -63,7 +66,12 @@ internal static class SamsungTvRootAgent
                     "setsid failed with errno " + Marshal.GetLastWin32Error());
             }
             DetachStandardStreams();
-            RunSession(arguments[0], port, secret, stagingDirectory);
+            RunSession(
+                arguments[0],
+                port,
+                secret,
+                stagingDirectory,
+                runtimeDirectory);
             WriteStatus("stopped");
             return 0;
         }
@@ -78,6 +86,7 @@ internal static class SamsungTvRootAgent
         }
         finally
         {
+            DeleteRuntimeDirectory(runtimeDirectory);
             if (secret != null)
             {
                 Zero(secret);
@@ -89,7 +98,8 @@ internal static class SamsungTvRootAgent
         string host,
         int port,
         byte[] secret,
-        string readableDirectory)
+        string readableDirectory,
+        string runtimeDirectory)
     {
         using (TcpClient client = new TcpClient())
         {
@@ -188,12 +198,13 @@ internal static class SamsungTvRootAgent
                         }
                         string path = Path.GetFullPath(
                             Encoding.UTF8.GetString(pathBytes));
-                        if (!path.StartsWith(
+                        if (!IsAllowedFilePath(
+                                path,
                                 readableDirectory,
-                                StringComparison.Ordinal))
+                                runtimeDirectory))
                         {
                             throw new InvalidDataException(
-                                "READFILE path is outside the staging directory");
+                                "READFILE path is outside the allowed directories");
                         }
                         FileInfo file = new FileInfo(path);
                         if (!file.Exists
@@ -238,12 +249,13 @@ internal static class SamsungTvRootAgent
                         }
                         string path = Path.GetFullPath(
                             Encoding.UTF8.GetString(pathBytes));
-                        if (!path.StartsWith(
+                        if (!IsAllowedFilePath(
+                                path,
                                 readableDirectory,
-                                StringComparison.Ordinal))
+                                runtimeDirectory))
                         {
                             throw new InvalidDataException(
-                                "WRITEFILE path is outside the staging directory");
+                                "WRITEFILE path is outside the allowed directories");
                         }
                         byte[] data = ReadExact(stream, length);
                         string digest;
@@ -664,6 +676,55 @@ internal static class SamsungTvRootAgent
                 "root-agent staging directory is outside the allowed root");
         }
         return path;
+    }
+
+    private static string PrepareRuntimeDirectory()
+    {
+        Directory.CreateDirectory(RuntimeRoot);
+        if (chmod(RuntimeRoot, 448) != 0)
+        {
+            throw new IOException(
+                "runtime root chmod failed with errno "
+                + Marshal.GetLastWin32Error());
+        }
+        string path = Path.Combine(RuntimeRoot, "agent-" + getpid());
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true);
+        }
+        Directory.CreateDirectory(path);
+        if (chmod(path, 448) != 0)
+        {
+            Directory.Delete(path, true);
+            throw new IOException(
+                "runtime directory chmod failed with errno "
+                + Marshal.GetLastWin32Error());
+        }
+        return path + Path.DirectorySeparatorChar;
+    }
+
+    private static bool IsAllowedFilePath(
+        string path,
+        string stagingDirectory,
+        string runtimeDirectory)
+    {
+        return path.StartsWith(stagingDirectory, StringComparison.Ordinal)
+            || path.StartsWith(runtimeDirectory, StringComparison.Ordinal);
+    }
+
+    private static void DeleteRuntimeDirectory(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch
+        {
+        }
     }
 
     private sealed class CommandResult

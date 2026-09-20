@@ -38,6 +38,7 @@ from .qn90b import Qn90bError, Qn90bRootExploit
 from .qn90f import (
     DEFAULT_PAYLOAD_DIRECTORY as QN90F_PAYLOAD_DIRECTORY,
     RootAgentError,
+    RootScript,
     TVDeviceProfile,
     run_root_session,
 )
@@ -505,6 +506,14 @@ def command_qn90b_uep(arguments: argparse.Namespace) -> int:
 
 
 def command_qn90f_root(arguments: argparse.Namespace) -> int:
+    if arguments.script is None and arguments.script_argument is not None:
+        raise CommandError("--script-argument requires --script")
+    script = None
+    if arguments.script is not None:
+        script = RootScript.from_path(
+            arguments.script,
+            arguments=tuple(arguments.script_argument or ()),
+        )
     resolve_direct_target(arguments, "qn90f")
     if arguments.skip_preflight:
         print(
@@ -533,6 +542,7 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
         sdb_timeout=arguments.sdb_timeout,
         payload_directory=arguments.payload_directory,
         commands=arguments.command,
+        script=script,
         shell_port=arguments.shell_port,
         shell_connect_timeout=arguments.shell_connect_timeout,
     )
@@ -943,7 +953,19 @@ def build_parser() -> argparse.ArgumentParser:
     qn90f_commands = qn90f.add_subparsers(dest="qn90f_command", required=True)
     qn90f_root = qn90f_commands.add_parser("root")
     add_root_options(qn90f_root, QN90F_PAYLOAD_DIRECTORY)
-    qn90f_root.add_argument("--command", action="append")
+    qn90f_execution = qn90f_root.add_mutually_exclusive_group()
+    qn90f_execution.add_argument("--command", action="append")
+    qn90f_execution.add_argument(
+        "--script",
+        type=Path,
+        help="run a local Bash script through the authenticated root session",
+    )
+    qn90f_root.add_argument(
+        "--script-argument",
+        action="append",
+        metavar="VALUE",
+        help="argument passed to --script; repeat for multiple arguments",
+    )
     qn90f_root.add_argument("--callback-host")
     qn90f_root.add_argument("--bind-host")
     qn90f_root.add_argument("--port", type=int, default=0)

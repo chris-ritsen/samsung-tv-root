@@ -76,6 +76,15 @@ samsung-tv-root.exe preflight qn90f
 samsung-tv-root.exe qn90f root
 ```
 
+To run a local Bash script without installing it or replacing the TV's Bash:
+
+```bat
+samsung-tv-root.exe qn90f root --script httptoolkit.sh
+```
+
+The script is staged under volatile `/run` storage and removed with the root
+session. Use `--script-argument VALUE` repeatedly when arguments are needed.
+
 An explicit address remains supported:
 
 ```console

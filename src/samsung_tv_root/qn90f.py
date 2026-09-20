@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import re
 import secrets
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from .root_agent import (
     DEFAULT_ACCEPT_TIMEOUT,
     DEFAULT_COMMAND_TIMEOUT,
+    MAXIMUM_FRAME_BYTES,
     RootAgentConnection,
     RootAgentError,
     RootAgentServer,
@@ -28,12 +30,18 @@ from .qn90f_shell import (
     RootShellConfig,
 )
 from .resources import payload_directory
-from .sdb import build_shell_injection, find_sdb, route_callback_host, sdb_reported_error
+from .sdb import (
+    build_shell_injection,
+    find_sdb,
+    route_callback_host,
+    sdb_reported_error,
+)
 
 
 SDB_PORT = 26101
 DEFAULT_SDB_TIMEOUT = 15.0
 REMOTE_STAGING_DIRECTORY = PurePosixPath("/home/owner/share/tmp/sdk_tools/qn90f-probe")
+REMOTE_RUNTIME_ROOT = PurePosixPath("/run/samsung-tv-root")
 REMOTE_PROBE_PATH = REMOTE_STAGING_DIRECTORY / "MaliPhysicalProbe.dll"
 REMOTE_AGENT_PATH = REMOTE_STAGING_DIRECTORY / "SamsungTvRootAgent.dll"
 ROOT_ACQUISITION_PAYLOAD_FILES = (
@@ -76,6 +84,32 @@ class RootSessionTransientError(RootSessionError):
 
 class SdbTransportError(RootSessionTransientError):
     pass
+
+
+@dataclass(frozen=True)
+class RootScript:
+    data: bytes
+    arguments: tuple[str, ...] = ()
+
+    @classmethod
+    def from_path(
+        cls,
+        path: Path,
+        *,
+        arguments: tuple[str, ...] = (),
+    ) -> RootScript:
+        source = path.expanduser()
+        try:
+            data = source.read_bytes()
+        except OSError as error:
+            raise RootSessionError(
+                f"could not read script {source}: {error}"
+            ) from error
+        if len(data) > MAXIMUM_FRAME_BYTES:
+            raise RootSessionError(
+                f"script exceeds the {MAXIMUM_FRAME_BYTES}-byte upload limit: {source}"
+            )
+        return cls(data=data, arguments=arguments)
 
 
 @dataclass(frozen=True)
@@ -486,7 +520,13 @@ class Qn90fRootSession:
         self.sdb = sdb
         self.acquirer = Qn90fRootAcquirer(config, sdb, on_listening)
 
-    async def run(self, commands: list[str] | None) -> int:
+    async def run(
+        self,
+        commands: list[str] | None,
+        script: RootScript | None = None,
+    ) -> int:
+        if commands and script is not None:
+            raise RootSessionError("use either root commands or a script, not both")
         lease = await self.acquirer.acquire()
         identity = lease.connection.identity
         print(
@@ -512,7 +552,9 @@ class Qn90fRootSession:
             flush=True,
         )
         try:
-            if commands:
+            if script is not None:
+                status = await self._run_script(lease.connection, script)
+            elif commands:
                 status = await self._run_commands(lease.connection, commands)
             else:
                 status = await Qn90fRootShell(
@@ -549,6 +591,72 @@ class Qn90fRootSession:
             if result.exit_code != 0:
                 final_status = result.exit_code
         return final_status
+
+    async def _run_script(
+        self,
+        connection: RootAgentConnection,
+        script: RootScript,
+    ) -> int:
+        remote_directory = REMOTE_RUNTIME_ROOT / f"agent-{connection.identity.pid}"
+        remote_path = remote_directory / f"script-{secrets.token_hex(8)}"
+        await connection.write_file(
+            remote_path,
+            script.data,
+            self.config.command_timeout,
+        )
+        command = build_root_script_command(remote_path, script)
+        try:
+            result = await connection.execute(command, self.config.command_timeout)
+        except BaseException as error:
+            try:
+                await self._remove_script(connection, remote_path)
+            except BaseException as cleanup_error:
+                error.add_note(f"script cleanup also failed: {cleanup_error}")
+            raise
+        await self._remove_script(connection, remote_path)
+        if result.stdout:
+            sys.stdout.write(result.stdout)
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+        print(
+            f"script_exit={result.exit_code} timed_out={str(result.timed_out).lower()}",
+            flush=True,
+        )
+        return result.exit_code
+
+    async def _remove_script(
+        self,
+        connection: RootAgentConnection,
+        remote_path: PurePosixPath,
+    ) -> None:
+        cleanup = await connection.execute(
+            shlex.join(("/bin/rm", "-f", str(remote_path))),
+            self.config.command_timeout,
+        )
+        if cleanup.timed_out or cleanup.exit_code != 0:
+            detail = cleanup.stderr.strip() or cleanup.stdout.strip()
+            raise RootSessionError(
+                "could not remove the volatile root script"
+                + (f": {detail}" if detail else "")
+            )
+
+
+def build_root_script_command(
+    remote_path: PurePosixPath,
+    script: RootScript,
+) -> str:
+    return shlex.join(
+        (
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            'source "$0"',
+            str(remote_path),
+            *script.arguments,
+        )
+    )
+
 
 def _single_integer_line(lines: tuple[str, ...], name: str) -> int:
     match = _single_match(
@@ -628,6 +736,7 @@ def run_root_session(
     sdb_timeout: float = DEFAULT_SDB_TIMEOUT,
     payload_directory: Path = DEFAULT_PAYLOAD_DIRECTORY,
     commands: list[str] | None = None,
+    script: RootScript | None = None,
     shell_port: int = DEFAULT_ROOT_SHELL_PORT,
     shell_connect_timeout: float = DEFAULT_SHELL_CONNECT_TIMEOUT,
 ) -> int:
@@ -644,6 +753,7 @@ def run_root_session(
         shell_port=shell_port,
         shell_connect_timeout=shell_connect_timeout,
     )
+
     def report_listener(callback: str, bind: str, port: int, timeout: float) -> None:
         binding = "" if callback == bind else f" (bound at {bind}:{port})"
         print(
@@ -658,7 +768,7 @@ def run_root_session(
         SdbExploitClient(find_sdb(), tv_host, timeout=sdb_timeout),
         report_listener,
     )
-    return asyncio.run(session.run(commands))
+    return asyncio.run(session.run(commands, script))
 
 
 def main(argv: list[str] | None = None) -> None:

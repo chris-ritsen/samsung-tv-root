@@ -360,6 +360,52 @@ def test_qn90f_root_passes_interactive_shell_options(monkeypatch) -> None:
     assert observed["shell_connect_timeout"] == 12.5
 
 
+def test_qn90f_root_passes_local_script_and_arguments(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "http toolkit.sh"
+    source.write_bytes(b"printf '%s\\n' \"$1\"\n")
+    arguments = cli.build_parser().parse_args(
+        [
+            "qn90f",
+            "root",
+            "192.0.2.50",
+            "--skip-preflight",
+            "--script",
+            str(source),
+            "--script-argument",
+            "first value",
+            "--script-argument=--second",
+        ]
+    )
+    observed: dict[str, object] = {}
+
+    def run_root_session(*args, **kwargs):
+        observed.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "run_root_session", run_root_session)
+
+    assert arguments.handler(arguments) == 0
+    script = observed["script"]
+    assert script.data == source.read_bytes()
+    assert script.arguments == ("first value", "--second")
+    assert observed["commands"] is None
+
+
+def test_qn90f_root_rejects_script_options_without_script() -> None:
+    arguments = cli.build_parser().parse_args(
+        [
+            "qn90f",
+            "root",
+            "192.0.2.50",
+            "--script-argument",
+            "unused",
+        ]
+    )
+
+    with pytest.raises(cli.CommandError, match="requires --script"):
+        arguments.handler(arguments)
+
+
 def test_qn90f_preflight_rejects_empty_callback_output(monkeypatch) -> None:
     class Client:
         def __init__(self, executable: Path, host: str, *, timeout: float) -> None:

@@ -218,6 +218,20 @@ Type `exit` or press Ctrl-D to close it. The temporary TV listener accepts only
 the selected controller address, defaults to TCP port 22222, and is removed
 when the session ends. Use `--shell-port PORT` if that port is unavailable.
 
+Run a local Bash script as root without Samsung's script-filename signature
+check:
+
+```console
+./samsung-tv-root qn90f root "$TV_IP" --script ./httptoolkit.sh
+```
+
+The authenticated root agent uploads the script to a private per-session
+directory under `/run`, invokes Bash with the script sourced through `-c`, and
+removes the directory when the agent exits. It does not replace `/bin/bash` or
+install the script. Repeat `--script-argument VALUE` to pass arguments. UEP must
+first be disabled for the current boot only when the script itself launches
+unsigned native executables.
+
 The QN90F preflight first compares a no-op with a bounded two-second delay to
 prove that the SDB package-name injection executed. It then stages a read-only
 fingerprint script through SDB, reports the exact callback address and port,
