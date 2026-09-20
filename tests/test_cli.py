@@ -391,6 +391,35 @@ def test_qn90f_root_passes_local_script_and_arguments(monkeypatch, tmp_path) -> 
     assert observed["commands"] is None
 
 
+def test_qn90f_root_passes_authenticated_file_pull(monkeypatch, tmp_path) -> None:
+    destination = tmp_path / "remote-file"
+    arguments = cli.build_parser().parse_args(
+        [
+            "qn90f",
+            "root",
+            "192.0.2.50",
+            "--skip-preflight",
+            "--pull",
+            "/home/owner/share/tmp/remote-file",
+            str(destination),
+        ]
+    )
+    observed: dict[str, object] = {}
+
+    def run_root_session(*args, **kwargs):
+        observed.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "run_root_session", run_root_session)
+
+    assert arguments.handler(arguments) == 0
+    pull = observed["pull"]
+    assert str(pull.remote_path) == "/home/owner/share/tmp/remote-file"
+    assert pull.local_path == destination
+    assert observed["commands"] is None
+    assert observed["script"] is None
+
+
 def test_qn90f_root_rejects_script_options_without_script() -> None:
     arguments = cli.build_parser().parse_args(
         [

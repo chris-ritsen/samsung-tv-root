@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import os
 import re
 import secrets
 import shlex
@@ -110,6 +112,19 @@ class RootScript:
                 f"script exceeds the {MAXIMUM_FRAME_BYTES}-byte upload limit: {source}"
             )
         return cls(data=data, arguments=arguments)
+
+
+@dataclass(frozen=True)
+class RootFilePull:
+    remote_path: PurePosixPath
+    local_path: Path
+
+    @classmethod
+    def from_paths(cls, remote_path: str, local_path: Path) -> RootFilePull:
+        remote = PurePosixPath(remote_path)
+        if not remote.is_absolute() or remote.name in {"", ".", ".."}:
+            raise RootSessionError("remote pull path must be an absolute file path")
+        return cls(remote_path=remote, local_path=local_path.expanduser())
 
 
 @dataclass(frozen=True)
@@ -524,9 +539,12 @@ class Qn90fRootSession:
         self,
         commands: list[str] | None,
         script: RootScript | None = None,
+        pull: RootFilePull | None = None,
     ) -> int:
-        if commands and script is not None:
-            raise RootSessionError("use either root commands or a script, not both")
+        if sum((bool(commands), script is not None, pull is not None)) > 1:
+            raise RootSessionError(
+                "use only one of root commands, a script, or a file pull"
+            )
         lease = await self.acquirer.acquire()
         identity = lease.connection.identity
         print(
@@ -554,6 +572,8 @@ class Qn90fRootSession:
         try:
             if script is not None:
                 status = await self._run_script(lease.connection, script)
+            elif pull is not None:
+                status = await self._pull_file(lease.connection, pull)
             elif commands:
                 status = await self._run_commands(lease.connection, commands)
             else:
@@ -591,6 +611,141 @@ class Qn90fRootSession:
             if result.exit_code != 0:
                 final_status = result.exit_code
         return final_status
+
+    async def _pull_file(
+        self,
+        connection: RootAgentConnection,
+        pull: RootFilePull,
+    ) -> int:
+        source = str(pull.remote_path)
+        quoted_source = shlex.quote(source)
+        metadata = await connection.execute(
+            f"if test -f {quoted_source}; then wc -c < {quoted_source}; else exit 66; fi",
+            self.config.command_timeout,
+        )
+        self._require_transfer_command(metadata, f"inspect {source}")
+        size_text = metadata.stdout.strip()
+        if re.fullmatch(r"[0-9]+", size_text) is None:
+            raise RootSessionError(
+                f"remote file size was not a nonnegative integer: {size_text!r}"
+            )
+        source_size = int(size_text)
+
+        destination = pull.local_path
+        if destination.is_dir():
+            destination /= pull.remote_path.name
+        if not destination.parent.is_dir():
+            raise RootSessionError(
+                f"local destination directory does not exist: {destination.parent}"
+            )
+
+        remote_directory = REMOTE_RUNTIME_ROOT / f"agent-{connection.identity.pid}"
+        transfer_token = secrets.token_hex(8)
+        temporary_path: Path | None = None
+        digest = hashlib.sha256()
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=f".{destination.name}.",
+                suffix=".partial",
+                dir=destination.parent,
+                delete=False,
+            ) as output:
+                temporary_path = Path(output.name)
+                offset = 0
+                chunk_index = 0
+                while offset < source_size:
+                    chunk_path = remote_directory / (
+                        f"pull-{transfer_token}-{chunk_index}"
+                    )
+                    copy = await connection.execute(
+                        shlex.join(
+                            (
+                                "/bin/dd",
+                                f"if={source}",
+                                f"of={chunk_path}",
+                                f"bs={MAXIMUM_FRAME_BYTES}",
+                                f"skip={chunk_index}",
+                                "count=1",
+                            )
+                        ),
+                        self.config.command_timeout,
+                    )
+                    self._require_transfer_command(copy, f"read chunk {chunk_index}")
+                    try:
+                        chunk = await connection.read_file(
+                            chunk_path,
+                            self.config.command_timeout,
+                        )
+                    finally:
+                        await self._remove_transfer_chunk(connection, chunk_path)
+                    expected = min(MAXIMUM_FRAME_BYTES, source_size - offset)
+                    if len(chunk.data) != expected:
+                        raise RootSessionError(
+                            f"remote file chunk {chunk_index} has {len(chunk.data)} "
+                            f"bytes; expected {expected}"
+                        )
+                    output.write(chunk.data)
+                    digest.update(chunk.data)
+                    offset += len(chunk.data)
+                    chunk_index += 1
+                output.flush()
+                os.fsync(output.fileno())
+
+            remote_digest = await connection.execute(
+                shlex.join(("sha256sum", source)),
+                self.config.command_timeout,
+            )
+            self._require_transfer_command(remote_digest, f"hash {source}")
+            match = re.match(r"^([0-9a-fA-F]{64})(?:\s|$)", remote_digest.stdout)
+            if match is None:
+                raise RootSessionError("remote sha256sum returned invalid output")
+            observed_digest = digest.hexdigest()
+            expected_digest = match.group(1).lower()
+            if not secrets.compare_digest(observed_digest, expected_digest):
+                raise RootSessionError(
+                    "remote file changed during transfer or failed digest verification"
+                )
+            os.replace(temporary_path, destination)
+            temporary_path = None
+        except BaseException:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            raise
+
+        print(
+            f"pulled_remote={source} pulled_local={destination} "
+            f"bytes={source_size} sha256={digest.hexdigest()}",
+            flush=True,
+        )
+        return 0
+
+    @staticmethod
+    def _require_transfer_command(result: object, operation: str) -> None:
+        timed_out = getattr(result, "timed_out", True)
+        exit_code = getattr(result, "exit_code", -1)
+        if not timed_out and exit_code == 0:
+            return
+        detail = (
+            getattr(result, "stderr", "").strip()
+            or getattr(result, "stdout", "").strip()
+        )
+        raise RootSessionError(
+            f"could not {operation}"
+            + (" before timeout" if timed_out else f" (exit {exit_code})")
+            + (f": {detail}" if detail else "")
+        )
+
+    async def _remove_transfer_chunk(
+        self,
+        connection: RootAgentConnection,
+        chunk_path: PurePosixPath,
+    ) -> None:
+        cleanup = await connection.execute(
+            shlex.join(("/bin/rm", "-f", str(chunk_path))),
+            self.config.command_timeout,
+        )
+        self._require_transfer_command(cleanup, f"remove transfer chunk {chunk_path}")
 
     async def _run_script(
         self,
@@ -737,6 +892,7 @@ def run_root_session(
     payload_directory: Path = DEFAULT_PAYLOAD_DIRECTORY,
     commands: list[str] | None = None,
     script: RootScript | None = None,
+    pull: RootFilePull | None = None,
     shell_port: int = DEFAULT_ROOT_SHELL_PORT,
     shell_connect_timeout: float = DEFAULT_SHELL_CONNECT_TIMEOUT,
 ) -> int:
@@ -768,7 +924,7 @@ def run_root_session(
         SdbExploitClient(find_sdb(), tv_host, timeout=sdb_timeout),
         report_listener,
     )
-    return asyncio.run(session.run(commands, script))
+    return asyncio.run(session.run(commands, script, pull))
 
 
 def main(argv: list[str] | None = None) -> None:

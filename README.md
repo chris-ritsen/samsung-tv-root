@@ -285,25 +285,38 @@ launch uploaded native ELF programs. If a root shell is already open, exit it,
 run `uep disable`, and reopen it; do not start a second exploit session in
 parallel just to change UEP.
 
-A normal `sdb shell` remains closed on the tested retail firmware. `sdb` file
-transfer still works independently:
+A normal `sdb shell` remains closed on the tested retail firmware. `sdb push`
+works for the controller staging directory:
 
 ```console
-"$SDB" -s "$TV_IP:26101" push ./local-file /home/owner/share/tmp/local-file
-"$SDB" -s "$TV_IP:26101" pull /home/owner/share/tmp/remote-file ./remote-file
+"$SDB" -s "$TV_IP:26101" push ./local-file /home/owner/share/tmp/sdk_tools/local-file
 ```
 
-The Windows Command Prompt forms are:
+The Windows Command Prompt form is:
 
 ```bat
-"%SDB%" -s "%TV_IP%:26101" push local-file /home/owner/share/tmp/local-file
-"%SDB%" -s "%TV_IP%:26101" pull /home/owner/share/tmp/remote-file remote-file
+"%SDB%" -s "%TV_IP%:26101" push local-file /home/owner/share/tmp/sdk_tools/local-file
 ```
 
 TV paths passed to `sdb` are POSIX paths even on a Windows host, so prefer
-`/home/owner/share/tmp/...` there as well. To pull a root-only file, first use
-the root shell to copy it into `/home/owner/share/tmp` with an SDK-readable mode,
-then run `sdb pull` from the host.
+`/home/owner/share/tmp/...` there as well. Current retail firmware can reject
+`sdb pull` with `You cannot pull files from this path` even when the Unix mode
+allows the SDK user to read the file. Pull through the authenticated root
+session instead:
+
+```console
+./samsung-tv-root qn90f root "$TV_IP" \
+  --pull /home/owner/share/tmp/remote-file ./remote-file
+```
+
+```bat
+samsung-tv-root.exe qn90f root "%TV_IP%" --callback-host 192.0.2.10 ^
+  --pull /home/owner/share/tmp/remote-file remote-file
+```
+
+The controller reads the source without modifying it, stages bounded chunks
+only under volatile `/run/samsung-tv-root`, verifies the complete SHA-256, and
+atomically replaces the local destination after successful verification.
 
 UEP compatibility differs from root compatibility. The model reproduction
 document describes the tested boundaries and both supported application

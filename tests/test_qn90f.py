@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import shlex
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -9,6 +10,7 @@ from samsung_tv_root.qn90f import (
     REMOTE_RUNTIME_ROOT,
     REMOTE_STAGING_DIRECTORY,
     RootExploitCompletion,
+    RootFilePull,
     RootScript,
     RootSessionError,
     SdbExploitClient,
@@ -18,7 +20,11 @@ from samsung_tv_root.qn90f import (
     TVDeviceProfile,
     build_root_script_command,
 )
-from samsung_tv_root.root_agent import MAXIMUM_FRAME_BYTES, RootAgentResult
+from samsung_tv_root.root_agent import (
+    MAXIMUM_FRAME_BYTES,
+    RootAgentFile,
+    RootAgentResult,
+)
 
 
 def completion_output() -> str:
@@ -280,6 +286,110 @@ def test_qn90f_script_uses_volatile_directory_and_cleans_up(
     assert "script output" in captured.out
     assert "script_exit=7 timed_out=false" in captured.out
     assert "script error" in captured.err
+
+
+def test_qn90f_pull_uses_volatile_chunks_and_verifies_digest(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    data = b"a" * MAXIMUM_FRAME_BYTES + b"final chunk"
+    digest = hashlib.sha256(data).hexdigest()
+    identity = type(
+        "Identity",
+        (),
+        {
+            "pid": 4321,
+            "uid": 0,
+            "euid": 0,
+            "gid": 0,
+            "egid": 0,
+            "effective_capabilities": "3fffffffff",
+            "smack_label": "User",
+        },
+    )()
+
+    class Connection:
+        def __init__(self) -> None:
+            self.identity = identity
+            self.commands: list[str] = []
+            self.reads: list[PurePosixPath] = []
+
+        async def execute(self, command, timeout):
+            self.commands.append(command)
+            sequence = len(self.commands)
+            if "wc -c" in command:
+                return RootAgentResult(sequence, 0, False, f"{len(data)}\n", "")
+            if command.startswith("sha256sum "):
+                return RootAgentResult(sequence, 0, False, f"{digest}  source\n", "")
+            return RootAgentResult(sequence, 0, False, "", "")
+
+        async def read_file(self, path, timeout):
+            self.reads.append(path)
+            index = len(self.reads) - 1
+            chunk = data[
+                index * MAXIMUM_FRAME_BYTES : (index + 1) * MAXIMUM_FRAME_BYTES
+            ]
+            return RootAgentFile(index + 1, chunk, hashlib.sha256(chunk).hexdigest())
+
+    connection = Connection()
+    completion = type(
+        "Completion",
+        (),
+        {"sdk_uid": 901, "sdk_gid": 901, "transport_returncode": 1},
+    )()
+
+    class Lease:
+        remote_log_path = REMOTE_STAGING_DIRECTORY / "log"
+        listener_host = "192.0.2.10"
+        listener_port = 49152
+
+        def __init__(self) -> None:
+            self.connection = connection
+            self.completion = completion
+            self.shutdown_called = False
+            self.close_called = False
+
+        async def shutdown(self) -> None:
+            self.shutdown_called = True
+
+        async def close(self) -> None:
+            self.close_called = True
+
+    lease = Lease()
+    config = RootSessionConfig(
+        profile=TVDeviceProfile(),
+        tv_host="192.0.2.50",
+        callback_host="192.0.2.10",
+        bind_host="192.0.2.10",
+        listener_port=0,
+        accept_timeout=30.0,
+        command_timeout=45.0,
+        payload_directory=tmp_path,
+        payload_files=(),
+    )
+    session = Qn90fRootSession(config, object())
+    monkeypatch.setattr(session.acquirer, "acquire", lambda: _async_value(lease))
+    monkeypatch.setattr("samsung_tv_root.qn90f.secrets.token_hex", lambda _: "abcd")
+    destination = tmp_path / "remote-file"
+    pull = RootFilePull.from_paths(
+        "/home/owner/share/tmp/remote-file",
+        destination,
+    )
+
+    assert asyncio.run(session.run(None, pull=pull)) == 0
+
+    assert destination.read_bytes() == data
+    assert len(connection.reads) == 2
+    assert all(
+        str(path).startswith("/run/samsung-tv-root/agent-4321/pull-abcd-")
+        for path in connection.reads
+    )
+    assert sum(command.startswith("/bin/rm ") for command in connection.commands) == 2
+    assert lease.shutdown_called
+    assert lease.close_called
+    output = capsys.readouterr().out
+    assert f"bytes={len(data)} sha256={digest}" in output
 
 
 def test_root_script_rejects_oversized_upload(tmp_path) -> None:

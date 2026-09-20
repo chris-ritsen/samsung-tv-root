@@ -38,6 +38,7 @@ from .qn90b import Qn90bError, Qn90bRootExploit
 from .qn90f import (
     DEFAULT_PAYLOAD_DIRECTORY as QN90F_PAYLOAD_DIRECTORY,
     RootAgentError,
+    RootFilePull,
     RootScript,
     TVDeviceProfile,
     run_root_session,
@@ -514,6 +515,12 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
             arguments.script,
             arguments=tuple(arguments.script_argument or ()),
         )
+    pull = None
+    if arguments.pull is not None:
+        pull = RootFilePull.from_paths(
+            arguments.pull[0],
+            Path(arguments.pull[1]),
+        )
     resolve_direct_target(arguments, "qn90f")
     if arguments.skip_preflight:
         print(
@@ -543,6 +550,7 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
         payload_directory=arguments.payload_directory,
         commands=arguments.command,
         script=script,
+        pull=pull,
         shell_port=arguments.shell_port,
         shell_connect_timeout=arguments.shell_connect_timeout,
     )
@@ -959,6 +967,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--script",
         type=Path,
         help="run a local Bash script through the authenticated root session",
+    )
+    qn90f_execution.add_argument(
+        "--pull",
+        nargs=2,
+        metavar=("REMOTE", "LOCAL"),
+        help="copy one TV file through the authenticated root session",
     )
     qn90f_root.add_argument(
         "--script-argument",
