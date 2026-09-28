@@ -14,6 +14,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from . import __version__
+from .archive_root import ArchiveRootError, probe as probe_archive_root
 from .compatibility import QN90F_PROFILE, TargetAssessment, TargetCompatibilityError
 from .capabilities import CapabilityError
 from .capture import CaptureError, encode_png
@@ -315,7 +316,9 @@ def command_screenshot(arguments: argparse.Namespace) -> int:
         width = int(capture["width"])
         height = int(capture["height"])
     except (binascii.Error, KeyError, TypeError, ValueError) as error:
-        raise CommandError("root controller returned invalid screenshot data") from error
+        raise CommandError(
+            "root controller returned invalid screenshot data"
+        ) from error
     try:
         png = encode_png(rgb, width, height)
     except CaptureError as error:
@@ -493,6 +496,49 @@ def command_qn90b_root(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_archive_root_probe(arguments: argparse.Namespace) -> int:
+    host = arguments.legacy_host or arguments.host
+    evidence = asyncio.run(
+        probe_archive_root(
+            host,
+            model=arguments.host if arguments.legacy_host else None,
+            callback_host=arguments.callback_host,
+            bind_host=arguments.bind_host,
+            sdb_timeout=arguments.sdb_timeout,
+            accept_timeout=arguments.accept_timeout,
+            payloads=arguments.payload_directory,
+        )
+    )
+    emit(evidence, arguments.output)
+    return 0
+
+
+def command_archive_root_root(arguments: argparse.Namespace) -> int:
+    host = arguments.legacy_host or arguments.host
+    evidence = asyncio.run(
+        probe_archive_root(
+            host,
+            model=arguments.host if arguments.legacy_host else None,
+            callback_host=arguments.callback_host,
+            bind_host=arguments.bind_host,
+            sdb_timeout=arguments.sdb_timeout,
+            accept_timeout=arguments.accept_timeout,
+            command_timeout=arguments.command_timeout,
+            commands=tuple(arguments.command),
+            payloads=arguments.payload_directory,
+        )
+    )
+    emit(evidence, arguments.output)
+    return next(
+        (
+            command["exit_code"] or 1
+            for command in evidence["commands"]
+            if command["timed_out"] or command["exit_code"] != 0
+        ),
+        0,
+    )
+
+
 def command_qn90b_uep(arguments: argparse.Namespace) -> int:
     normalize_uep_arguments(arguments)
     resolve_direct_target(arguments, "qn90b")
@@ -595,9 +641,7 @@ def require_qn90f_uep_result(output: str, *, disable: bool) -> None:
     )
     missing = tuple(marker for marker in required if marker not in lines)
     if missing:
-        raise CommandError(
-            "QN90F UEP evidence is incomplete: " + ", ".join(missing)
-        )
+        raise CommandError("QN90F UEP evidence is incomplete: " + ", ".join(missing))
     exit_status = _single_qn90f_uep_value(lines, "exit", r"-?[0-9]+", brackets=True)
     if exit_status != "0":
         raise CommandError(f"QN90F UEP payload exited with status {exit_status}")
@@ -1004,6 +1048,32 @@ def build_parser() -> argparse.ArgumentParser:
     add_serve_arguments(qn90f_serve)
     qn90f_serve.set_defaults(handler=command_qn90f_serve)
 
+    archive_root = commands.add_parser(
+        "archive-root", help="SDK archive root route for compatible TVs"
+    )
+    archive_commands = archive_root.add_subparsers(
+        dest="archive_root_command", required=True
+    )
+
+    def add_archive_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("host", help="TV IPv4 address")
+        command.add_argument("legacy_host", nargs="?", help=argparse.SUPPRESS)
+        command.set_defaults(model=None)
+        command.add_argument("--callback-host")
+        command.add_argument("--bind-host")
+        command.add_argument("--sdb-timeout", type=float, default=15.0)
+        command.add_argument("--accept-timeout", type=float, default=30.0)
+        command.add_argument("--payload-directory", type=Path)
+
+    archive_probe = archive_commands.add_parser("probe")
+    add_archive_options(archive_probe)
+    archive_probe.set_defaults(handler=command_archive_root_probe)
+    archive_run = archive_commands.add_parser("root")
+    add_archive_options(archive_run)
+    archive_run.add_argument("--command", action="append", required=True)
+    archive_run.add_argument("--command-timeout", type=float, default=45.0)
+    archive_run.set_defaults(handler=command_archive_root_root)
+
     return parser
 
 
@@ -1015,6 +1085,7 @@ def main(argv: list[str] | None = None) -> None:
         status = arguments.handler(arguments)
     except (
         CommandError,
+        ArchiveRootError,
         CapabilityError,
         ConfigurationError,
         ControllerError,

@@ -20,6 +20,16 @@ PYINSTALLER_DIST = DIST / "pyinstaller"
 PYINSTALLER_WORK = ROOT / "build" / "pyinstaller"
 RELEASES = DIST / "releases"
 REQUIRED_PAYLOADS = {
+    "common": (
+        "SamsungTvArchiveRoot.dll",
+        "SamsungTvArchiveRoot.runtimeconfig.json",
+        "SamsungTvRootAgent.dll",
+        "SamsungTvRootAgent.runtimeconfig.json",
+    ),
+    "common31": (
+        "SamsungTvArchiveRoot.dll",
+        "SamsungTvRootAgent.dll",
+    ),
     "qn90b": (
         "FdetProbe.dll",
         "FdetProbe.runtimeconfig.json",

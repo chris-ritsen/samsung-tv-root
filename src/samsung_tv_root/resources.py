@@ -6,6 +6,16 @@ from pathlib import Path
 
 
 PAYLOAD_FILES = {
+    "common": (
+        "SamsungTvArchiveRoot.dll",
+        "SamsungTvArchiveRoot.runtimeconfig.json",
+        "SamsungTvRootAgent.dll",
+        "SamsungTvRootAgent.runtimeconfig.json",
+    ),
+    "common31": (
+        "SamsungTvArchiveRoot.dll",
+        "SamsungTvRootAgent.dll",
+    ),
     "qn90b": (
         "FdetProbe.dll",
         "FdetProbe.runtimeconfig.json",

@@ -39,7 +39,9 @@ python -m venv .venv
 
 On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. When running from a
 source checkout, preflight needs only Python and `sdb`; root commands also
-require the .NET 6 SDK and one `make payloads` build.
+require the .NET 6 SDK and one `make payloads` build. Building the archive route
+for TVs with only a .NET 3.1 runtime also requires a .NET 3.1 SDK/targeting
+pack.
 
 ## 4. Save the TV profile
 
@@ -95,6 +97,20 @@ An explicit address remains supported:
 Use `qn90b` for the 2022 PontusM platform. Preflight reports `tested`,
 `compatible-untested`, or `incompatible`. Successful root acquisition includes
 verification that temporary kernel state was restored.
+
+The third root route accepts any TV host. It checks the SDB foothold, required
+file capabilities, tar support, and installed .NET runtime on that TV before
+staging or executing a payload. A passing check is not proof that root will work
+until the authenticated UID 0 callback succeeds:
+
+```console
+./samsung-tv-root archive-root probe 192.0.2.50
+./samsung-tv-root archive-root root 192.0.2.50 --command 'id'
+```
+
+This route was live-tested on QN90B and QN90F. It does not yet provide an
+interactive shell, disable UEP, or replace the controller's root method. It
+cleans its per-run TV staging files after a normal session.
 
 ## 6. Keep root available
 

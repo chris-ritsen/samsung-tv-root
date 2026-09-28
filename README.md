@@ -53,6 +53,7 @@ requirements instead of rejecting every build-number change.
   `uid=901(sdk)` command foothold.
 - A QN90B `/dev/sdp_pqe_fdet` physical-memory exploit.
 - A QN90F Mali-G510 r48p0 exploit based on `CVE-2025-0072`.
+- A model-independent SDK archive-launcher root route, live-tested on my QN90B and QN90F.
 - Interactive root shells and authenticated root command execution.
 - UEP status and volatile disable controls for unsigned native execution.
 - An event-driven host controller that reacquires root after TV boot or root
@@ -321,6 +322,38 @@ atomically replaces the local destination after successful verification.
 UEP compatibility differs from root compatibility. The model reproduction
 document describes the tested boundaries and both supported application
 execution paths.
+
+### Archive root route
+
+This separate root method uses the SDB package-name foothold, a
+capability-bearing Samsung `dotnet`, a private mount namespace, and Samsung's
+signed-archive launcher. [motodrizzle](https://www.reddit.com/r/Tizen/comments/1wl4e0n/i_made_a_minimal_plexyoutube_launcher_the_default/)
+reported the capability/namespace/launcher route on an S90D; this implementation
+adapts that route. It has no model whitelist: it checks the SDB foothold,
+capabilities, tar support, and .NET runtime on the target and chooses its payload
+accordingly. It was live-tested on my QN90B and QN90F with an
+authenticated UID/GID 0 agent, root command execution, unchanged system-file
+hashes, and per-run staging cleanup. The S90D firmware has matching platform
+components, and its owner reported the same underlying route, but this exact
+implementation has not been run on an S90D. The agent still has Samsung's
+`User` SMACK label; UID 0 is not proof that every security boundary is gone.
+
+```console
+./samsung-tv-root archive-root probe "$TV_IP"
+./samsung-tv-root archive-root root "$TV_IP" --command 'id'
+```
+
+Use `-o json` before `archive-root` for machine-readable identity and cleanup
+evidence. The older `archive-root probe MODEL HOST` spelling still works, but
+the model label no longer selects or limits the route. `--command` can be
+repeated. This option does not yet provide an interactive PTY, disable UEP, or
+run through the host controller. The existing root commands remain the
+defaults. It never replaces `/etc/passwd`, the verification key, or the
+installed Bash on disk: the helper binds per-run views inside its own mount
+namespace. Its archive and payloads are staged under
+`/home/owner/share/tmp/sdk_tools` and normally removed after the session; an
+interrupted run may leave those files on persistent user storage. The ephemeral
+signing private key stays on the controller computer.
 
 ## Continuous controller
 

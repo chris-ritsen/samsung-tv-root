@@ -51,13 +51,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          dotnet-version: "6.0.x"
+          dotnet-version: |
+            3.1.x
+            6.0.x
       - name: Install ARM linker
         run: sudo apt-get update && sudo apt-get install --yes clang lld
       - run: make payloads swu-preloads
       - name: Verify payload types
         run: |
           for assembly in \
+            payloads/common/out/SamsungTvArchiveRoot.dll \
+            payloads/common31/out/SamsungTvArchiveRoot.dll \
+            payloads/common31/out/SamsungTvRootAgent.dll \
             payloads/qn90b/out/FdetProbe.dll \
             payloads/qn90b/out/SamsungTvRootAgent.dll \
             payloads/qn90b/out/SamsungTvRemoteInputAgent.dll \
@@ -78,6 +83,7 @@ jobs:
             file "$preload" | tee /dev/stderr | grep -q 'ELF 32-bit LSB shared object, ARM'
           done
           python -m json.tool payloads/qn90b/out/FdetProbe.runtimeconfig.json >/dev/null
+          python -m json.tool payloads/common/out/SamsungTvArchiveRoot.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/SamsungTvRootAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/SamsungTvRemoteInputAgent.runtimeconfig.json >/dev/null
           python -m json.tool payloads/qn90b/out/SamsungTvEventAgent.runtimeconfig.json >/dev/null
@@ -95,6 +101,8 @@ jobs:
         with:
           name: tv-payloads
           path: |
+            payloads/common/out
+            payloads/common31/out
             payloads/qn90b/out
             payloads/qn90f/out
             swu/out
