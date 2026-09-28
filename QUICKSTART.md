@@ -40,8 +40,7 @@ python -m venv .venv
 On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. When running from a
 source checkout, preflight needs only Python and `sdb`; root commands also
 require the .NET 6 SDK and one `make payloads` build. Building the archive route
-for TVs with only a .NET 3.1 runtime also requires a .NET 3.1 SDK/targeting
-pack.
+for TVs with only a .NET 3.1 runtime also requires a .NET 3.1 targeting pack.
 
 ## 4. Save the TV profile
 
