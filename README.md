@@ -1,4 +1,42 @@
-# Samsung TV root
+# Samsung TV root — fork: untethered boot-root + bridge + module manager
+
+This fork adds **untethered root** on top of upstream's host-driven toolkit:
+a boot-launched .NET agent that re-acquires root **on the TV, at every boot,
+with no host computer involved**, a token-gated **sdb bridge** so the host CLI
+keeps working while Developer Mode Host PC IP stays at `127.0.0.1`, and a
+Magisk/Cydia-style **module system** for debloat/telemetry kills. Proven
+end-to-end on QN55Q60BAFXZC / T-NKLBAKUC-1720.7 (Tizen 6.5.0, armv7l).
+
+![Boot agent v4 status screen](docs/assets/boot-agent-v4-on-tv.png)
+
+*The agent's status screen, captured **from the TV itself**: Samsung's own
+content-recognition capture path (`secvideo_api_capture_screen` in
+`libcapi-video-capture.so` → `libvideo-capture.so.0`) P/Invoked from a .NET
+agent running as root; the capture path is fixed at 720×576 NV12 (SD BT.601
+granularity — requested sizes are snapped), planes pulled over the bridge and
+converted off-device, aspect-corrected to 16:9.*
+
+Start here: [boot-agent/](boot-agent/) (agent + chain + deploy) ·
+[docs/PLAN-manager.md](docs/PLAN-manager.md) (roadmap: bridge → modules →
+manager UI → wizard) · [issue #1](https://github.com/chris-ritsen/samsung-tv-root/issues/1)
+(the Q60B report and full writeup).
+
+Key results:
+
+| Milestone | Status |
+| --- | --- |
+| `archive-root` on NKLB (Q60B) | shipped (compat fix: runtime enumeration fallback) |
+| Untethered boot-time self-root (agent v3) | proven (no host anywhere in the chain) |
+| sdb bridge — devIP stays `127.0.0.1`, host CLI through `TVROOT_BRIDGE_TOKEN` | shipped (M1) |
+| Agent v4 — UI freeze fix, single-shot chain, safe mode | shipped (M2) |
+| On-TV screenshot via Samsung's own capture API | proven (PoC above) |
+| Module system + telemetry debloat modules | next (M3) |
+
+---
+
+# Upstream README
+
+## Samsung TV root
 
 I built working root exploits for the two Samsung TVs I own: a QN90B purchased
 in 2022 and a QN90F purchased in July 2026. I use them to make the TVs less
