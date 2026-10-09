@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import os
+import re
+import select
 import shutil
 import socket
 import subprocess
@@ -15,6 +17,8 @@ from pathlib import Path, PurePosixPath
 
 
 SDB_PORT = 26101
+SDB_BRIDGE_PORT = 26103
+SDB_BRIDGE_TOKEN_LENGTH = 32
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_CAPTURE_TIMEOUT = 30.0
 SDB_APPINSTALL_PREFIX = "0 appinstall tpk "
@@ -132,6 +136,130 @@ class CaptureResult:
     transport_returncode: int
 
 
+class SdbBridgeProxy:
+    def __init__(
+        self,
+        tv_host: str,
+        bridge_port: int,
+        token: str,
+    ) -> None:
+        if not re.fullmatch(r"[0-9a-f]{32}", token):
+            raise SdbError("bridge token must be 32 lowercase hexadecimal characters")
+        if not 1 <= bridge_port <= 65535:
+            raise SdbError("bridge port must be between 1 and 65535")
+        self.tv_host = tv_host
+        self.bridge_port = bridge_port
+        self.token = token.encode("ascii")
+        self._listener: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
+
+    @property
+    def serial(self) -> str:
+        if self._listener is None:
+            raise SdbError("SDB bridge proxy has not started")
+        return f"127.0.0.1:{self._listener.getsockname()[1]}"
+
+    def start(self) -> None:
+        if self._listener is not None:
+            return
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        listener.settimeout(0.5)
+        self._listener = listener
+        self._thread = threading.Thread(
+            target=self._accept_connections,
+            name="sdb-bridge-proxy",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def close(self) -> None:
+        self._stopping.set()
+        if self._listener is not None:
+            self._listener.close()
+            self._listener = None
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def _accept_connections(self) -> None:
+        listener = self._listener
+        if listener is None:
+            return
+        while not self._stopping.is_set():
+            try:
+                client, _ = listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            threading.Thread(
+                target=self._relay,
+                args=(client,),
+                name="sdb-bridge-session",
+                daemon=True,
+            ).start()
+
+    def _relay(self, client: socket.socket) -> None:
+        remote: socket.socket | None = None
+        try:
+            remote = socket.create_connection(
+                (self.tv_host, self.bridge_port), timeout=5.0
+            )
+            remote.settimeout(None)
+            remote.sendall(self.token)
+            client.settimeout(None)
+            finished = threading.Event()
+            threading.Thread(
+                target=self._pump,
+                args=(client, remote, finished),
+                daemon=True,
+            ).start()
+            threading.Thread(
+                target=self._pump,
+                args=(remote, client, finished),
+                daemon=True,
+            ).start()
+            finished.wait()
+        except OSError:
+            pass
+        finally:
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            client.close()
+            if remote is not None:
+                try:
+                    remote.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                remote.close()
+
+    @staticmethod
+    def _pump(
+        source: socket.socket,
+        destination: socket.socket,
+        finished: threading.Event,
+    ) -> None:
+        try:
+            while True:
+                readable, _, exceptional = select.select([source], [], [source])
+                if exceptional or not readable:
+                    return
+                payload = source.recv(65536)
+                if not payload:
+                    return
+                destination.sendall(payload)
+        except OSError:
+            return
+        finally:
+            finished.set()
+
+
 class SdbClient:
     def __init__(
         self,
@@ -139,18 +267,41 @@ class SdbClient:
         tv_host: str,
         *,
         timeout: float = DEFAULT_TIMEOUT,
+        bridge_token: str | None = None,
+        bridge_port: int = SDB_BRIDGE_PORT,
     ) -> None:
         self.executable = executable
         self.tv_host = tv_host
         self.timeout = timeout
+        self.bridge_token = bridge_token or os.environ.get("TVROOT_BRIDGE_TOKEN")
+        self.bridge_port = bridge_port
+        self._bridge_proxy: SdbBridgeProxy | None = None
 
     @property
     def serial(self) -> str:
+        if self._bridge_proxy is not None:
+            return self._bridge_proxy.serial
         return f"{self.tv_host}:{SDB_PORT}"
 
     def connect(self) -> None:
-        result = self.run(("connect", self.serial), check=False)
+        if self.bridge_token and self._bridge_proxy is None:
+            self._bridge_proxy = SdbBridgeProxy(
+                self.tv_host,
+                self.bridge_port,
+                self.bridge_token,
+            )
+            self._bridge_proxy.start()
+        try:
+            result = self.run(("connect", self.serial), check=False)
+        except Exception:
+            if self._bridge_proxy is not None:
+                self._bridge_proxy.close()
+                self._bridge_proxy = None
+            raise
         if result.returncode != 0:
+            if self._bridge_proxy is not None:
+                self._bridge_proxy.close()
+                self._bridge_proxy = None
             raise SdbError(command_failure("sdb connect", result))
 
     def require_device(self) -> None:
@@ -165,7 +316,12 @@ class SdbClient:
         raise SdbError(f"SDB device {self.serial} is not listed by sdb devices")
 
     def disconnect(self) -> None:
-        self.run(("disconnect", self.serial), check=False)
+        try:
+            self.run(("disconnect", self.serial), check=False)
+        finally:
+            if self._bridge_proxy is not None:
+                self._bridge_proxy.close()
+                self._bridge_proxy = None
 
     def push(self, local_path: Path, remote_path: PurePosixPath) -> None:
         result = self.run(

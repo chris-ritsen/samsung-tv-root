@@ -4,6 +4,12 @@
 **Upstream:** `chris-ritsen/samsung-tv-root` · **Working issue:** https://github.com/chris-ritsen/samsung-tv-root/issues/1
 **Inspiration:** https://github.com/GLinnik21/plx-native (LG webOS native Plex client; this project's "step in that direction" is a native, self-rooting, module-managed Tizen TV)
 
+**P1 checkpoint (2026-10-09):** Agent v3.1 now has a token-gated TCP bridge and
+the Python CLI can reach it through a local token-injecting proxy. The agent
+builds against the preserved TV frameworks. The DLL and bridge token are
+installed with a TV-side backup; live bridge acceptance remains pending the
+final reboot with Developer Mode `Host PC IP=127.0.0.1`.
+
 This document is a complete handoff. A fresh agent (no prior session memory) should be able
 to execute on it after reading: **this file → issue #1 → the fork's `boot-agent/README.md` →
 the fork's source tree.** Everything in §1–§2 is *verified fact from the prior session* —

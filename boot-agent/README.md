@@ -33,6 +33,18 @@ boot
 Everything from `boot` down runs on the TV. The host is only needed to install
 the agent once.
 
+After a fresh root proof, agent v3.1 starts an authenticated SDB TCP bridge on
+`0.0.0.0:26103`. It reads a 32-character lowercase hex token from
+`/opt/usr/share/selfroot/bridge.conf`, requires those exact 32 bytes at the
+start of each connection, then relays to `127.0.0.1:26101`. The default port is
+`26103`; an optional `/opt/usr/share/selfroot/bridge-port.conf` selects another
+port from `1024` through `65535`. Connection attempts
+are recorded in
+`/home/owner/share/tmp/sdk_tools/selfroot-evidence/bridge.log`.
+
+The bridge token is sent in cleartext on the local network. Use a random token,
+keep it private, and use the bridge only on a trusted LAN.
+
 ## The three pieces
 
 1. **The boot trigger** — `package_app_info.app_onboot` in
@@ -101,11 +113,48 @@ sqlite3 /opt/dbspace/.pkgmgr_parser.db \
    app_component='uiapp' WHERE app_id='com.samsung.tv.ghservice';"
 sed -i 's/<service-application/<ui-application/; s|</service-application>|</ui-application>|' \
   $APP/tizen-manifest.xml   # keep on-boot="true", type="dotnet-inhouse"
+
+# On the host, while the TV still accepts this desktop as Developer Mode host:
+BRIDGE_TOKEN=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+printf '%s\n' "$BRIDGE_TOKEN" > /tmp/tvroot-bridge.conf
+SDB="$HOME/tizen-studio/tools/sdb"
+"$SDB" push /tmp/tvroot-bridge.conf /home/owner/share/tmp/sdk_tools/bridge.conf
+
+# In the TV root shell, install the staged token:
+mkdir -p /opt/usr/share/selfroot
+chmod 755 /opt/usr/share/selfroot
+chsmack -a _ /opt/usr/share/selfroot
+cp /home/owner/share/tmp/sdk_tools/bridge.conf /opt/usr/share/selfroot/bridge.conf
+chmod 644 /opt/usr/share/selfroot/bridge.conf
+chsmack -a _ /opt/usr/share/selfroot/bridge.conf
+
+# Optional: create this file to use a port other than 26103.
+# printf '26104\n' > /opt/usr/share/selfroot/bridge-port.conf
+# chmod 644 /opt/usr/share/selfroot/bridge-port.conf
+# chsmack -a _ /opt/usr/share/selfroot/bridge-port.conf
+
+# Back on the host, keep the token in a private password manager or environment.
+printf 'Save this token on the manager: %s\n' "$BRIDGE_TOKEN"
 ```
 
 Then set **Developer Mode Host PC IP to `127.0.0.1`** (Apps → Settings →
 `12345`) and reboot. The agent boots, self-roots, and shows its green status
-screen.
+screen. Once rooted, it listens on port `26103`.
+
+### Connect the existing desktop CLI through the bridge
+
+The CLI starts a loopback proxy that prepends the bridge token, so Tizen Studio's
+`sdb` executable remains unchanged. Set `TVROOT_BRIDGE_TOKEN` to the token
+recorded during installation:
+
+```
+TVROOT_BRIDGE_TOKEN=<32-character-token> \
+  python -m samsung_tv_root archive-root root <tv-ip> --command 'id'
+```
+
+Use `--bridge-port` if the TV has a `bridge-port.conf` with a different port.
+The TV callback still connects directly to the desktop over the LAN, so allow
+the selected callback port through the desktop firewall as usual.
 
 ## Operating model
 

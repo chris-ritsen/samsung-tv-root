@@ -2,12 +2,18 @@ import base64
 import re
 import socket
 import subprocess
+import threading
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from samsung_tv_root import sdb as sdb_module
-from samsung_tv_root.sdb import SdbClient, SdbError, build_shell_injection
+from samsung_tv_root.sdb import (
+    SdbBridgeProxy,
+    SdbClient,
+    SdbError,
+    build_shell_injection,
+)
 
 
 def test_shell_injection_round_trip() -> None:
@@ -21,6 +27,70 @@ def test_shell_injection_round_trip() -> None:
 def test_shell_injection_has_no_literal_space() -> None:
     injection = build_shell_injection("printf ok", gate_token="ab")
     assert " " not in injection
+
+
+def test_sdb_bridge_proxy_prepends_token_and_relays_frames() -> None:
+    bridge_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    bridge_listener.bind(("127.0.0.1", 0))
+    bridge_listener.listen(1)
+    bridge_listener.settimeout(2.0)
+    bridge_port = int(bridge_listener.getsockname()[1])
+    token = "a1" * 16
+    received: dict[str, bytes] = {}
+
+    def bridge_session() -> None:
+        connection, peer_address = bridge_listener.accept()
+        assert peer_address
+        with connection:
+            token_bytes = bytearray()
+            while len(token_bytes) < 32:
+                token_bytes.extend(connection.recv(32 - len(token_bytes)))
+            received["token"] = bytes(token_bytes)
+            connection.sendall(b"CNXN")
+            received["frame"] = connection.recv(4)
+
+    server_thread = threading.Thread(target=bridge_session, daemon=True)
+    server_thread.start()
+    proxy = SdbBridgeProxy("127.0.0.1", bridge_port, token)
+    proxy.start()
+    try:
+        proxy_port = int(proxy.serial.rsplit(":", 1)[1])
+        with socket.create_connection(("127.0.0.1", proxy_port), timeout=2.0) as client:
+            assert client.recv(4) == b"CNXN"
+            client.sendall(b"OPEN")
+        server_thread.join(timeout=2.0)
+        assert not server_thread.is_alive()
+        assert received == {"token": token.encode("ascii"), "frame": b"OPEN"}
+    finally:
+        proxy.close()
+        bridge_listener.close()
+
+
+def test_sdb_bridge_proxy_rejects_malformed_token() -> None:
+    with pytest.raises(SdbError, match="32 lowercase hexadecimal"):
+        SdbBridgeProxy("192.0.2.50", 26103, "not-a-token")
+
+
+def test_sdb_client_connects_through_local_bridge_proxy(monkeypatch) -> None:
+    client = SdbClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26104,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(client, "run", run)
+    client.connect()
+    serial = client.serial
+    client.disconnect()
+
+    assert serial.startswith("127.0.0.1:")
+    assert calls == [("connect", serial), ("disconnect", serial)]
 
 
 def test_require_device_accepts_ready_serial(monkeypatch) -> None:
