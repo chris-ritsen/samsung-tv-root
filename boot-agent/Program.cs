@@ -13,8 +13,8 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    // === v3.1: sdbd localhost route and authenticated desktop bridge ===
-    private const string BuildTime = "2026-10-09T16:37Z";
+    // === v4: UI keep-alive fix, single-shot boot chain, safe mode, bridge ===
+    private const string BuildTime = "2026-10-09T17:40Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -23,6 +23,8 @@ public static class GhUIAgent
     private const string OnDemand = "/home/owner/share/tmp/sdk_tools/on-demand";
     private const string Evidence = "/home/owner/share/tmp/sdk_tools/selfroot-evidence";
     private const string Mark = "/tmp/selfroot";
+    private const string SafeModeFile = "/opt/usr/share/selfroot/safe-mode";
+    private const int SessionAttempts = 18;          // 18 x 10s = 3 min for sdbd to come up
     private const string BridgeConfig = "/opt/usr/share/selfroot/bridge.conf";
     private const string BridgePortConfig = "/opt/usr/share/selfroot/bridge-port.conf";
     private const int DefaultBridgePort = 26103;
@@ -32,7 +34,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "BOOT AGENT v3.1";
+    private static string Banner = "BOOT AGENT v4";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static bool Done;
 
@@ -41,6 +43,13 @@ public static class GhUIAgent
     private static TextLabel[] Lines = new TextLabel[11];
     private static View Bar;
     private static readonly string[] Last = new string[11];
+
+    // v4: hold the NUI Timer in a static field. In v3.x it was a BuildUi local;
+    // NUI Timer is a managed wrapper over a native handle, and with no rooted
+    // reference the GC collects the wrapper mid-run and the native timer dies.
+    // The UI then freezes on the last rendered frame (observed: frozen at
+    // "ROOT CHAIN RUNNING" while the chain provably completed).
+    private static Tizen.NUI.Timer _uiTimer;
 
     public static void Note(string text, double p)
     {
@@ -83,7 +92,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "GH BOOT AGENT v3.1";
+        w.Title = "GH BOOT AGENT v4";
 
         BannerLabel = new TextLabel
         {
@@ -97,7 +106,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v3.1 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v4 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -144,9 +153,9 @@ public static class GhUIAgent
             w.Add(Lines[i]);
         }
 
-        var timer = new Tizen.NUI.Timer(300);
-        timer.Tick += OnTick;
-        timer.Start();
+        _uiTimer = new Tizen.NUI.Timer(300);
+        _uiTimer.Tick += OnTick;
+        _uiTimer.Start();
     }
 
     private static bool OnTick(object sender, Tizen.NUI.Timer.TickEventArgs e)
@@ -273,18 +282,52 @@ public static class GhUIAgent
                     BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
                 }
 
+                // v4: safe mode — flag file skips the chain and the bridge.
+                if (File.Exists(SafeModeFile))
+                {
+                    Note("safe-mode flag present: " + SafeModeFile, 0.0);
+                    lock (Gate)
+                    {
+                        Banner = "SAFE MODE - CHAIN SKIPPED";
+                        BannerColor = new Color(1f, 0.6f, 0.2f, 1f);
+                        Done = true;
+                    }
+                    return;
+                }
+
+                lock (Gate)
+                {
+                    Banner = "WAITING FOR SDBD (127.0.0.1)";
+                    BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
+                }
+
+                // v4: single-shot chain. sdbd caches the dev host IP at startup
+                // (live flips do nothing), so retrying past its boot window is
+                // pointless — park with a clear status instead of polling forever.
                 Socket s = null;
                 int attempt = 0;
-                while (true)
+                while (attempt < SessionAttempts)
                 {
                     attempt++;
                     lock (Gate) { Progress = 0.12; }
-                    if (attempt == 1 || attempt % 30 == 0)
+                    if (attempt == 1 || attempt % 6 == 0)
                     {
-                        Note("retry " + attempt + " - flip Host PC IP to 127.0.0.1 to self-root", 0.12);
+                        Note("sdbd wait " + attempt + "/" + SessionAttempts
+                            + " (dev IP must be 127.0.0.1)", 0.12);
                     }
                     if (TrySession(out s)) break;
                     Thread.Sleep(10000);
+                }
+                if (s == null)
+                {
+                    Note("no sdbd session in " + SessionAttempts + " attempts", 0.12);
+                    lock (Gate)
+                    {
+                        Banner = "SKIPPED - DEV IP NOT 127.0.0.1?";
+                        BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
+                        Done = true;
+                    }
+                    return;
                 }
 
                 lock (Gate)
@@ -298,11 +341,11 @@ public static class GhUIAgent
                 using (s)
                 {
                     s.Send(Frame("OPEN", 0x10, 0, Encoding.ASCII.GetBytes("capability:\0")));
-                    string c; uint a0, a1; byte[] p;
+                    string c; uint a0; byte[] p;
                     int guard = 0;
                     while (guard++ < 6)
                     {
-                        if (!ReadFrame(s, out c, out a0, out a1, out p)) break;
+                        if (!ReadFrame(s, out c, out a0, out _, out p)) break;
                         if (c == "OKAY") { s.Send(Frame("OKAY", 0x10, a0, new byte[0])); break; }
                         if (c == "CLSE") break;
                     }
@@ -312,15 +355,28 @@ public static class GhUIAgent
                     s.Send(Frame("OPEN", 0x12, 0, service));
                     Note("injection fired via appinstall shell", 0.60);
 
-                    var deadline = DateTime.UtcNow.AddSeconds(25);
-                    var sawOkay = false;
+                    // v4: frames are advisory only — do not gate on OKAY. The
+                    // appinstall service can CLSE before an OKAY we would count,
+                    // which printed a false "shell accepted=False" in v3.x while
+                    // the injection ran fine. The fresh-proof poll below is the
+                    // single source of truth for chain success.
+                    var frameLog = new List<string>();
+                    var deadline = DateTime.UtcNow.AddSeconds(8);
+                    s.ReceiveTimeout = 2000;
+                    uint serviceId = 0x12;
                     while (DateTime.UtcNow < deadline)
                     {
-                        if (!ReadFrame(s, out c, out a0, out a1, out p)) break;
-                        if (c == "OKAY") { sawOkay = true; s.Send(Frame("OKAY", 0x12, a0, new byte[0])); }
+                        uint fArg0; uint fArg1;
+                        if (!ReadFrame(s, out c, out fArg0, out fArg1, out p)) break;
+                        frameLog.Add(c);
+                        if (c == "OKAY" || c == "WRTE")
+                        {
+                            try { s.Send(Frame("OKAY", serviceId, fArg0, new byte[0])); } catch { }
+                        }
                         if (c == "CLSE") break;
                     }
-                    Note("shell accepted=" + sawOkay, 0.70);
+                    s.ReceiveTimeout = 10000;
+                    Note("injection frames: " + string.Join(",", frameLog), 0.65);
                 }
 
                 lock (Gate)
@@ -363,10 +419,11 @@ public static class GhUIAgent
                 }
                 lock (Gate)
                 {
-                    Banner = "NO PROOF AFTER 2 MIN - WILL RETRY NEXT BOOT";
+                    Banner = "NO FRESH PROOF AFTER 2 MIN";
                     BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
                     Done = true;
                 }
+                Note("next boot retries automatically", 0);
             }
             catch (Exception e)
             {
