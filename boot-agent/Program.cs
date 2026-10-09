@@ -13,8 +13,8 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    // === v4: UI keep-alive fix, single-shot boot chain, safe mode, bridge ===
-    private const string BuildTime = "2026-10-09T17:40Z";
+    // === v5: early-proof poll (modules can take minutes), scroll + close ===
+    private const string BuildTime = "2026-10-09T19:05Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -34,15 +34,18 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "BOOT AGENT v4";
+    private static string Banner = "BOOT AGENT v5";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static bool Done;
 
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
-    private static TextLabel[] Lines = new TextLabel[11];
+    private static TextLabel HintLabel;
+    private static TextLabel[] Lines = new TextLabel[20];
     private static View Bar;
-    private static readonly string[] Last = new string[11];
+    private static readonly List<string> History = new List<string>();
+    private static int ScrollOffset;          // v5: 0 = tail, >0 = scrolled up
+    private static bool UiDirty = true;        // v5: force refresh on scroll
 
     // v4: hold the NUI Timer in a static field. In v3.x it was a BuildUi local;
     // NUI Timer is a managed wrapper over a native handle, and with no rooted
@@ -92,7 +95,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "GH BOOT AGENT v4";
+        w.Title = "GH BOOT AGENT v5";
 
         BannerLabel = new TextLabel
         {
@@ -106,7 +109,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v4 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -116,13 +119,14 @@ public static class GhUIAgent
 
         var hint = new TextLabel
         {
-            Text = "self-root: Developer Mode Host PC IP = 127.0.0.1",
+            Text = "self-root: Host PC IP = 127.0.0.1 | Up/Down: scroll log | Return: close",
             PointSize = 16,
             TextColor = new Color(0.6f, 0.6f, 0.6f, 1f),
             Position2D = new Position2D(120, 176),
             Size2D = new Size2D(1680, 28),
         };
         w.Add(hint);
+        HintLabel = hint;
 
         var bgBar = new View
         {
@@ -153,9 +157,49 @@ public static class GhUIAgent
             w.Add(Lines[i]);
         }
 
+        // v5: remote keys — Up/Down scroll the full history, Return closes
+        // the app when the chain is done (or skips the wait anytime).
+        w.KeyEvent += OnUiKey;
+
         _uiTimer = new Tizen.NUI.Timer(300);
         _uiTimer.Tick += OnTick;
         _uiTimer.Start();
+    }
+
+    private static void OnUiKey(object sender, Window.KeyEventArgs e)
+    {
+        var name = e.Key != null ? e.Key.KeyPressedName : null;
+        if (string.IsNullOrEmpty(name)) return;
+        lock (Gate)
+        {
+            if (name == "Up")
+            {
+                ScrollOffset = System.Math.Min(ScrollOffset + 1,
+                    System.Math.Max(0, History.Count - Lines.Length));
+                UiDirty = true;
+            }
+            else if (name == "Down")
+            {
+                ScrollOffset = System.Math.Max(0, ScrollOffset - 1);
+                UiDirty = true;
+            }
+            else if (name == "Return" || name == "Exit" || name == "XF86Back")
+            {
+                CloseRequested = true;   // OnTick performs the exit on the UI thread
+            }
+        }
+    }
+
+    private static bool CloseRequested;
+
+    private static void RequestExit()
+    {
+        try
+        {
+            var app = Tizen.Applications.Application.Current as NUIApplication;
+            if (app != null) app.Exit();
+        }
+        catch { }
     }
 
     private static bool OnTick(object sender, Tizen.NUI.Timer.TickEventArgs e)
@@ -165,31 +209,48 @@ public static class GhUIAgent
         string banner;
         Color bannerColor;
         bool done;
+        bool dirty;
+        int scroll;
         lock (Gate)
         {
             if (Events.Count > 0)
             {
                 pending = new List<string>(Events);
                 Events.Clear();
+                History.AddRange(pending);
+                if (History.Count > 400) History.RemoveRange(0, History.Count - 400);
             }
             progress = Progress;
             banner = Banner;
             bannerColor = BannerColor;
             done = Done;
+            dirty = UiDirty;
+            scroll = ScrollOffset;
+            UiDirty = false;
         }
-        if (pending != null)
+        if (pending != null || dirty)
         {
-            foreach (var text in pending)
+            // window over the full history; ScrollOffset counts back from tail
+            int total = History.Count;
+            int start = System.Math.Max(0, total - Lines.Length - scroll);
+            for (int i = 0; i < Lines.Length; i++)
             {
-                for (int i = 0; i < Last.Length - 1; i++) Last[i] = Last[i + 1];
-                Last[Last.Length - 1] = text;
+                int idx = start + i;
+                Lines[i].Text = idx < total ? History[idx] : "";
             }
-            for (int i = 0; i < Lines.Length; i++) Lines[i].Text = Last[i] ?? "";
+            HintLabel.Text = scroll > 0
+                ? $"scrolled {scroll} up | Down: newer | Return: close"
+                : "Up: scroll log | Return: close";
         }
         if (BannerLabel.Text != banner) BannerLabel.Text = banner;
         if (bannerColor != BannerLabel.TextColor) BannerLabel.TextColor = bannerColor;
         var width = (int)(1680 * progress);
         Bar.Size2D = new Size2D(width, 22);
+        if (CloseRequested)
+        {
+            RequestExit();
+            return false;
+        }
         return !done;
     }
 
@@ -355,14 +416,11 @@ public static class GhUIAgent
                     s.Send(Frame("OPEN", 0x12, 0, service));
                     Note("injection fired via appinstall shell", 0.60);
 
-                    // v4: frames are advisory only — do not gate on OKAY. The
-                    // appinstall service can CLSE before an OKAY we would count,
-                    // which printed a false "shell accepted=False" in v3.x while
-                    // the injection ran fine. The fresh-proof poll below is the
-                    // single source of truth for chain success.
+                    // v5: 15s frame window (output can arrive buffered/late);
+                    // frames stay advisory only — the proof poll is truth.
                     var frameLog = new List<string>();
-                    var deadline = DateTime.UtcNow.AddSeconds(8);
-                    s.ReceiveTimeout = 2000;
+                    var deadline = DateTime.UtcNow.AddSeconds(15);
+                    s.ReceiveTimeout = 3000;
                     uint serviceId = 0x12;
                     while (DateTime.UtcNow < deadline)
                     {
@@ -385,27 +443,39 @@ public static class GhUIAgent
                     BannerColor = new Color(0.4f, 0.8f, 1f, 1f);
                 }
 
-                for (int i = 0; i < 40; i++)
+                // v5: modules (e.g. the ad-daemon mask/stop loop) can take
+                // minutes, and the outer script copies the EV proof late — so
+                // launch.sh now also writes the proof to EV directly from the
+                // root context. Poll BOTH paths for up to 6 minutes.
+                const int pollTotal = 120;              // 120 x 3s = 6 min
+                for (int i = 0; i < pollTotal; i++)
                 {
                     Thread.Sleep(3000);
                     bool proof = false;
-                    try
+                    string proofText = null;
+                    foreach (var proofPath in new[]
                     {
-                        var proofPath = Evidence + "/selfroot-proof.txt";
-                        proof = File.Exists(proofPath)
-                            && File.GetLastWriteTimeUtc(proofPath) >= bootStarted.AddSeconds(-5)
-                            && File.ReadAllText(proofPath).Contains("SELFROOT-PROOF uid=0");
-                    }
-                    catch { }
-                    lock (Gate) { Progress = 0.70 + 0.29 * (i / 40.0); }
-                    if (i % 4 == 0) Note("polling for proof " + (i + 1) + "/40", 0.70 + 0.29 * (i / 40.0));
-                    if (proof)
+                        Evidence + "/selfroot-proof.txt",   // early root-context copy (v5)
+                        "/tmp/selfroot-proof.txt",          // tar launch.sh copy
+                    })
                     {
                         try
                         {
-                            Note("PROOF:\n" + File.ReadAllText(Evidence + "/selfroot-proof.txt"), 1.0);
+                            if (!File.Exists(proofPath)) continue;
+                            if (File.GetLastWriteTimeUtc(proofPath) < bootStarted.AddSeconds(-5)) continue;
+                            var text = File.ReadAllText(proofPath);
+                            if (!text.Contains("SELFROOT-PROOF uid=0")) continue;
+                            proof = true;
+                            proofText = text;
+                            break;
                         }
                         catch { }
+                    }
+                    lock (Gate) { Progress = 0.70 + 0.29 * (i / (double)pollTotal); }
+                    if (i % 8 == 0) Note("polling for proof " + (i + 1) + "/" + pollTotal, 0.70 + 0.29 * (i / (double)pollTotal));
+                    if (proof)
+                    {
+                        try { Note("PROOF:\n" + proofText, 1.0); } catch { }
                         lock (Gate)
                         {
                             Banner = "ROOT ACQUIRED - UNTETHERED";
@@ -419,7 +489,7 @@ public static class GhUIAgent
                 }
                 lock (Gate)
                 {
-                    Banner = "NO FRESH PROOF AFTER 2 MIN";
+                    Banner = "NO FRESH PROOF AFTER 6 MIN";
                     BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
                     Done = true;
                 }

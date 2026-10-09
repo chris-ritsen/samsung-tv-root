@@ -28,10 +28,18 @@ LAUNCH_SH = """exec 2>&1
 } > /tmp/selfroot-proof.txt
 chsmack -a _ /tmp/selfroot-proof.txt 2>/dev/null
 
+# v5: publish the proof to the persistent evidence dir IMMEDIATELY (root
+# context), so the agent can go green + start the bridge while modules
+# (which can take minutes) are still running.
+EV=/home/owner/share/tmp/sdk_tools/selfroot-evidence
+mkdir -p "$EV" 2>/dev/null
+cp /tmp/selfroot-proof.txt "$EV/selfroot-proof.txt" 2>/dev/null
+chmod 666 "$EV/selfroot-proof.txt" 2>/dev/null
+chsmack -a _ "$EV" "$EV/selfroot-proof.txt" 2>/dev/null
+
 # module runner: persistent /opt modules, executed as root at every boot.
 # Modules never need tar rebuilds; enable/disable via a 'disabled' flag file.
 MODS=/opt/usr/share/selfroot/modules
-EV=/home/owner/share/tmp/sdk_tools/selfroot-evidence
 if [ -d "$MODS" ]; then
   mkdir -p "$EV" 2>/dev/null
   for m in "$MODS"/*/; do
