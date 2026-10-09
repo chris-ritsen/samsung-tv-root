@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Boot agent: on-boot dotnet-inhouse IL that re-acquires root without any host.
+       Build against the TV's own framework assemblies:
+         TV_FRAMEWORK_DIR=/path/to/dotnet.tizen/framework dotnet build -c Release
+       Pull /usr/share/dotnet.tizen off the TV first (see README.md). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <!-- The assembly name must match the app whose slot this agent occupies.
+         Squatting com.samsung.tv.ghservice; use your own appid for a clean install. -->
+    <AssemblyName>com.samsung.tv.ghservice</AssemblyName>
+    <RootNamespace>GhUIAgent</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseAppHost>false</UseAppHost>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DebugType>none</DebugType>
+    <LangVersion>8.0</LangVersion>
+    <TvFrameworkDir>$(TV_FRAMEWORK_DIR)</TvFrameworkDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Tizen.NUI">
+      <HintPath>$(TvFrameworkDir)/Tizen.NUI.dll</HintPath>
+    </Reference>
+    <Reference Include="Tizen.Applications.Common">
+      <HintPath>$(TvFrameworkDir)/Tizen.Applications.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="Tizen.System">
+      <HintPath>$(TvFrameworkDir)/Tizen.System.dll</HintPath>
+    </Reference>
+    <Reference Include="Tizen">
+      <HintPath>$(TvFrameworkDir)/Tizen.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
