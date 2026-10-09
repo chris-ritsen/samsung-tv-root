@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 public static class GhUIAgent
 {
     // === v5: early-proof poll (modules can take minutes), scroll + close ===
-    private const string BuildTime = "2026-10-09T19:05Z";
+    private const string BuildTime = "2026-10-09T19:35Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -34,7 +34,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "BOOT AGENT v5";
+    private static string Banner = "BOOT AGENT v5.1";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static bool Done;
 
@@ -95,7 +95,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "GH BOOT AGENT v5";
+        w.Title = "GH BOOT AGENT v5.1";
 
         BannerLabel = new TextLabel
         {
@@ -109,7 +109,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.1 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -403,10 +403,12 @@ public static class GhUIAgent
                 {
                     s.Send(Frame("OPEN", 0x10, 0, Encoding.ASCII.GetBytes("capability:\0")));
                     string c; uint a0; byte[] p;
-                    int guard = 0;
-                    while (guard++ < 6)
+                    var capDeadline = DateTime.UtcNow.AddSeconds(10);
+                    while (DateTime.UtcNow < capDeadline)
                     {
-                        if (!ReadFrame(s, out c, out a0, out _, out p)) break;
+                        var capStatus = ReadFrame(s, out c, out a0, out _, out p);
+                        if (capStatus == ReadStatus.Closed) break;
+                        if (capStatus == ReadStatus.Timeout) continue;   // keep waiting
                         if (c == "OKAY") { s.Send(Frame("OKAY", 0x10, a0, new byte[0])); break; }
                         if (c == "CLSE") break;
                     }
@@ -416,8 +418,10 @@ public static class GhUIAgent
                     s.Send(Frame("OPEN", 0x12, 0, service));
                     Note("injection fired via appinstall shell", 0.60);
 
-                    // v5: 15s frame window (output can arrive buffered/late);
-                    // frames stay advisory only — the proof poll is truth.
+                    // v5.1: 15s window; a TIMEOUT now keeps polling until the
+                    // deadline (v4/v5 broke on the first 2-3s quiet read and
+                    // logged nothing). Frames stay advisory — the proof poll
+                    // is the single source of truth.
                     var frameLog = new List<string>();
                     var deadline = DateTime.UtcNow.AddSeconds(15);
                     s.ReceiveTimeout = 3000;
@@ -425,7 +429,9 @@ public static class GhUIAgent
                     while (DateTime.UtcNow < deadline)
                     {
                         uint fArg0; uint fArg1;
-                        if (!ReadFrame(s, out c, out fArg0, out fArg1, out p)) break;
+                        var frameStatus = ReadFrame(s, out c, out fArg0, out fArg1, out p);
+                        if (frameStatus == ReadStatus.Closed) break;
+                        if (frameStatus == ReadStatus.Timeout) continue;   // quiet socket: keep waiting
                         frameLog.Add(c);
                         if (c == "OKAY" || c == "WRTE")
                         {
@@ -434,7 +440,8 @@ public static class GhUIAgent
                         if (c == "CLSE") break;
                     }
                     s.ReceiveTimeout = 10000;
-                    Note("injection frames: " + string.Join(",", frameLog), 0.65);
+                    Note("injection frames: " + (frameLog.Count > 0
+                        ? string.Join(",", frameLog) : "(none within 15s - advisory only)"), 0.65);
                 }
 
                 lock (Gate)
@@ -712,6 +719,11 @@ public static class GhUIAgent
         {
             int n;
             try { n = s.Receive(buffer, got, needed - got, SocketFlags.None); }
+            catch (System.Net.Sockets.SocketException ex)
+                when (ex.SocketErrorCode == System.Net.Sockets.SocketError.TimedOut)
+            {
+                return -1;   // no data yet — caller may retry within its deadline
+            }
             catch { return got; }
             if (n <= 0) return got;
             got += n;
@@ -719,18 +731,33 @@ public static class GhUIAgent
         return got;
     }
 
-    private static bool ReadFrame(Socket s, out string cmd, out uint arg0, out uint arg1, out byte[] payload)
+    // v5.1: tri-state so a quiet socket (waiting for the injected command's
+    // first WRTE, which can take seconds) is distinguishable from a dead one.
+    // v4/v5 broke out of the frame log on the first read timeout and always
+    // printed "injection frames: " empty.
+    private enum ReadStatus { Ok, Timeout, Closed }
+
+    private static ReadStatus ReadFrame(Socket s, out string cmd, out uint arg0, out uint arg1, out byte[] payload)
     {
         cmd = null; arg0 = 0; arg1 = 0; payload = new byte[0];
         var header = new byte[24];
-        if (ReadExact(s, header, 24) < 24) return false;
+        int got = ReadExact(s, header, 24);
+        if (got == -1) return ReadStatus.Timeout;
+        if (got < 24) return ReadStatus.Closed;
         cmd = Encoding.ASCII.GetString(header, 0, 4);
         arg0 = BitConverter.ToUInt32(header, 4);
         arg1 = BitConverter.ToUInt32(header, 8);
         uint len = BitConverter.ToUInt32(header, 12);
         payload = new byte[len];
-        if (len > 0) ReadExact(s, payload, (int)Math.Min(len, 8192));
-        return true;
+        if (len > 0)
+        {
+            int gotPayload = ReadExact(s, payload, (int)Math.Min(len, 8192));
+            if (gotPayload == -1 || gotPayload < (int)Math.Min(len, 8192))
+            {
+                return ReadStatus.Closed;   // stream broke mid-frame
+            }
+        }
+        return ReadStatus.Ok;
     }
 
     private static bool TrySession(out Socket s)
@@ -745,7 +772,7 @@ public static class GhUIAgent
             s.Connect("127.0.0.1", 26101);
             s.Send(Cnxn);
             string c; uint a0, a1; byte[] p;
-            if (!ReadFrame(s, out c, out a0, out a1, out p))
+            if (ReadFrame(s, out c, out a0, out a1, out p) != ReadStatus.Ok)
             {
                 s.Close(); s = null; return false;
             }
