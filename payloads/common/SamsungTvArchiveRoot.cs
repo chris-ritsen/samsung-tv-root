@@ -18,15 +18,27 @@ internal static class SamsungTvArchiveRoot
 
     public static int Main(string[] arguments)
     {
-        if (arguments.Length != 1 || !ValidPackage(arguments[0]))
+        string package;
+        string staging;
+        string onDemand;
+        if (arguments.Length == 1 && ValidPackage(arguments[0]))
         {
-            Console.Error.WriteLine("usage: SamsungTvArchiveRoot.dll archive-root-HEX");
+            package = arguments[0];
+            staging = StagingRoot + package + "/";
+            onDemand = StagingRoot + "on-demand/";
+        }
+        else if (arguments.Length == 3 && ValidPackage(arguments[0]))
+        {
+            package = arguments[0];
+            staging = arguments[1].EndsWith("/") ? arguments[1] : arguments[1] + "/";
+            onDemand = arguments[2].EndsWith("/") ? arguments[2] : arguments[2] + "/";
+        }
+        else
+        {
+            Console.Error.WriteLine("usage: SamsungTvArchiveRoot.dll archive-root-HEX [staging on-demand]");
             return 2;
         }
-
-        string package = arguments[0];
-        string staging = StagingRoot + package;
-        string logPath = staging + "/launcher.log";
+        string logPath = "/tmp/archive-root-" + package + ".log";
         bool keyMounted = false;
         bool passwdMounted = false;
         try
@@ -45,13 +57,13 @@ internal static class SamsungTvArchiveRoot
             {
                 throw NativeError("make root mount tree private");
             }
-            if (mount(staging + "/public.pem", VerificationKey, null,
+            if (mount(staging + "public.pem", VerificationKey, null,
                 new UIntPtr(MountBind), null) != 0)
             {
                 throw NativeError("bind verification key");
             }
             keyMounted = true;
-            if (mount(staging + "/passwd", Passwd, null,
+            if (mount(staging + "passwd", Passwd, null,
                 new UIntPtr(MountBind), null) != 0)
             {
                 throw NativeError("bind passwd view");
@@ -65,7 +77,7 @@ internal static class SamsungTvArchiveRoot
             start.ArgumentList.Add("--package_name");
             start.ArgumentList.Add(package);
             start.ArgumentList.Add("-xzf");
-            start.ArgumentList.Add(StagingRoot + "on-demand/" + package + ".tar.gz");
+            start.ArgumentList.Add(onDemand + package + ".tar.gz");
             start.ArgumentList.Add("--to-command=/bin/sh");
             using (Process process = Process.Start(start))
             {
