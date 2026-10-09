@@ -1,0 +1,9 @@
+{
+  "id": "00-canary",
+  "name": "Module runner canary",
+  "version": "1.0.0",
+  "description": "Proves the boot-time module runner executes as root. No side effects.",
+  "author": "levkropp",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}

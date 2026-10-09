@@ -27,6 +27,26 @@ LAUNCH_SH = """exec 2>&1
   echo "---DONE---"
 } > /tmp/selfroot-proof.txt
 chsmack -a _ /tmp/selfroot-proof.txt 2>/dev/null
+
+# module runner: persistent /opt modules, executed as root at every boot.
+# Modules never need tar rebuilds; enable/disable via a 'disabled' flag file.
+MODS=/opt/usr/share/selfroot/modules
+EV=/home/owner/share/tmp/sdk_tools/selfroot-evidence
+if [ -d "$MODS" ]; then
+  mkdir -p "$EV" 2>/dev/null
+  for m in "$MODS"/*/; do
+    [ -d "$m" ] || continue
+    mid=$(basename "$m")
+    if [ -f "$m/disabled" ]; then
+      echo "$(date) skip $mid (disabled)" >> "$EV/modules.log"
+      continue
+    fi
+    [ -f "$m/boot.sh" ] || continue
+    echo "$(date) run $mid" >> "$EV/modules.log"
+    ( cd "$m" && cat "$m/boot.sh" | MODULE_DIR="$m" EVIDENCE="$EV" bash ) > "$EV/module-$mid.log" 2>&1
+    echo "$(date) $mid exit=$?" >> "$EV/modules.log"
+  done
+fi
 sleep 5
 """
 
