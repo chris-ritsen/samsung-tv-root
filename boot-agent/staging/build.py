@@ -59,11 +59,20 @@ with tempfile.TemporaryDirectory() as td:
     pinned = os.path.join(OUT, "pinned-private.pem")
     if os.path.exists(pinned):
         import shutil; shutil.copy(pinned, priv)
+        print("signing key: PINNED", os.path.realpath(pinned))
     else:
+        print("signing key: *** GENERATING A NEW KEYPAIR ***")
+        print("    A public.pem already staged on a TV will NOT verify a fresh")
+        print("    key (tarlauncher exit 255, no root, no proof). Copy the")
+        print("    canonical pinned-private.pem into out/ and rebuild.")
         openssl("genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
                 "-out", priv)
         import shutil; shutil.copy(priv, pinned)
     openssl("pkey", "-in", priv, "-pubout", "-out", pub)
+    import hashlib
+    print("public.pem sha256:", hashlib.sha256(
+        open(pub, "rb").read()).hexdigest()[:16],
+        "(must match the public.pem staged on the TV)")
     # passwd view: owner maps to uid 0
     with open(os.path.join(td, "passwd"), "w") as f:
         f.write("owner:x:0:0:owner:/home/owner:/bin/sh\n")
