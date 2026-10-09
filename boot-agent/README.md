@@ -218,16 +218,49 @@ CapEff: 0000003fffffffff
 owner:x:0:0:owner:/home/owner:/bin/sh     <- our bind-mounted passwd view
 ```
 
-## TODO
+## On-TV manager UI (M4)
+
+The v5.4 build is a four-page manager: `STATUS`, `MODULES`, `LOGS`, `PAIRING`.
+Left/Right switch pages (one press = one page — key releases are ignored, so
+a single press can never skip two pages); Up/Down select a module or scroll
+logs; OK toggles; Back/Exit closes. The status page reports root proof time,
+bridge state/port, token hint, safe-mode state, and module counts; Up on the
+status page toggles safe mode for the next boot (marker in the app-writable
+`selfroot-ui/` dir, honored like the flag file; undo by toggling again or
+`rm` over the bridge). The pairing page shows a plain-text `tvroot://` URI;
+the bearer token is only shown on that page. A QR renderer is not included
+in this pass (generate the QR on the manager host from the pairing URI and
+push the PNG later — `ImageView` is available).
+
+Reopening the manager from the launcher (`TVRoot` tile — the squatted
+`com.samsung.tv.ghservice` manifest label was renamed from GHService) is
+instant: if this boot already has fresh proof the agent skips the injection
+entirely, goes green, and restarts the bridge (reopen fast-path). A full
+chain only runs at boot. Closing the manager stops its process and with it
+the bridge; reopening restores both in seconds.
+
+Module toggles apply on the next boot because the root runner snapshots
+overrides before executing any module. The UI writes overrides under
+`/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/{enabled,disabled}/`;
+the root runner checks those overrides along with each module's `disabled`
+flag under `/opt/usr/share/selfroot/modules/<id>/`. An explicit UI enable
+override takes precedence over a module's default disabled flag.
+
+Platform note (cost a debug cycle): the agent (SMACK `User::Pkg::*`) can
+append to `User::App::Shared`-labeled files in the evidence dir but can
+neither create files nor write floor-labeled (`_`) ones there. `launch.sh`
+therefore pre-creates `agent.log` (touch + chmod 666 + chsmack to
+`User::App::Shared`) at every boot; the LOGS page tails it (persistent)
+plus the in-memory session events. `module.json` files are staged alongside
+`boot.sh` so the UI shows real module names/versions.
+
+## Remaining work
 
 - **Dedicated appid.** A fresh `package_app_info` row + manifest dir +
   `on-boot=true` instead of squatting `com.samsung.tv.ghservice`: no
-  collateral damage, clean uninstall. The SQL and manifest are ordinary
-  writable storage, so this should be a small change; not yet tested here.
-- **Safe-mode flag file** so a module or chain bug can't brick the boot
-  agent's slot.
-- Debloat/telemetry-disable modules applied by the agent once it has root at
-  boot (the reason this agent exists).
+  collateral damage, clean uninstall. The SQL INSERT remains untested.
+- QR pairing and the desktop/Android wizard remain part of the companion-app
+  milestone.
 
 ## Safety
 

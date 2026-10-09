@@ -4,11 +4,15 @@
 **Upstream:** `chris-ritsen/samsung-tv-root` · **Working issue:** https://github.com/chris-ritsen/samsung-tv-root/issues/1
 **Inspiration:** https://github.com/GLinnik21/plx-native (LG webOS native Plex client; this project's "step in that direction" is a native, self-rooting, module-managed Tizen TV)
 
-**P1 checkpoint (2026-10-09):** Agent v3.1 now has a token-gated TCP bridge and
-the Python CLI can reach it through a local token-injecting proxy. The agent
-builds against the preserved TV frameworks. The DLL and bridge token are
-installed with a TV-side backup; live bridge acceptance remains pending the
-final reboot with Developer Mode `Host PC IP=127.0.0.1`.
+**Live checkpoint (2026-10-09):** M1 bridge, M2 boot agent, and M3 module runner
+are working on the TV. M4 v5.2 was deployed locally (not committed or pushed),
+then cold-booted with Developer Mode `Host PC IP=127.0.0.1`. The TV returned in
+about 54 seconds; fresh uid 0 proof, successful module runs, and an authenticated
+`archive-root root ... --command id` round-trip through port `26103` were verified.
+The agent process and UI override directories were present after boot. Page
+rendering and remote-key toggles still need visual on-device validation; QR
+pairing remains deferred. A pre-deploy rollback copy is saved on the TV and in
+`~/tv-preserve/1720.7/m4-pre-v52-2026-10-09/`.
 
 This document is a complete handoff. A fresh agent (no prior session memory) should be able
 to execute on it after reading: **this file → issue #1 → the fork's `boot-agent/README.md` →
@@ -340,6 +344,20 @@ Extend to:
   the desktop companion (P5); the TV UI stays small and safe.
 
 ---
+
+**M4 v0.1 implementation (shipped 2026-10-09 as agent v5.3/v5.4):** status,
+module, log, and plain-text pairing pages; couch toggles write
+enabled/disabled overrides in the shared writable directory and are
+snapshotted by the root runner, so they apply on the next boot. Reopening
+the manager from the launcher is instant via a fast-path (fresh proof from
+this boot skips the chain, restarts the bridge). STATUS Up toggles safe
+mode; key releases are ignored so one press never jumps two pages; the
+launcher tile was renamed to TVRoot (manifest label UPDATE only); `module.json`
+is staged with each module for real names in the UI; `launch.sh` pre-creates
+`agent.log` with the app-writable SMACK label (the app cannot create files
+in the evidence dir itself). Cold-boot root/bridge path live-verified (full
+module run 15:24-15:26 EDT, proof uid 0, bridge up); pairing URI is text-only,
+QR renderer deferred to M5 (host-generated PNG + ImageView).
 
 ## 9. P5 — desktop/Android companion wizard (UX is the product)
 

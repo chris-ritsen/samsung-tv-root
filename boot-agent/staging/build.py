@@ -33,19 +33,38 @@ chsmack -a _ /tmp/selfroot-proof.txt 2>/dev/null
 # (which can take minutes) are still running.
 EV=/home/owner/share/tmp/sdk_tools/selfroot-evidence
 mkdir -p "$EV" 2>/dev/null
+# M4: pre-create the agent log with the app-writable SMACK label. The agent
+# (User::Pkg::*) can append to User::App::Shared files here but can neither
+# create files nor write floor-labeled (_) ones - verified live 2026-10-09
+# (agent.log stayed 0 bytes until root touched + relabeled it).
+touch "$EV/agent.log" 2>/dev/null
+chmod 666 "$EV/agent.log" 2>/dev/null
+chsmack -a 'User::App::Shared' "$EV/agent.log" 2>/dev/null
 cp /tmp/selfroot-proof.txt "$EV/selfroot-proof.txt" 2>/dev/null
 chmod 666 "$EV/selfroot-proof.txt" 2>/dev/null
 chsmack -a _ "$EV" "$EV/selfroot-proof.txt" 2>/dev/null
 
 # module runner: persistent /opt modules, executed as root at every boot.
-# Modules never need tar rebuilds; enable/disable via a 'disabled' flag file.
 MODS=/opt/usr/share/selfroot/modules
+UI_MODS=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
+UI_STATE=/tmp/selfroot-module-state
+mkdir -p "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
+chmod 0777 "$UI_MODS" "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
+chsmack -r -a _ "$UI_MODS" 2>/dev/null
+rm -rf "$UI_STATE"
+mkdir -p "$UI_STATE/enabled" "$UI_STATE/disabled"
+for state in enabled disabled; do
+  for marker in "$UI_MODS/$state/"*; do
+    [ -f "$marker" ] || continue
+    touch "$UI_STATE/$state/$(basename "$marker")"
+  done
+done
 if [ -d "$MODS" ]; then
   mkdir -p "$EV" 2>/dev/null
   for m in "$MODS"/*/; do
     [ -d "$m" ] || continue
     mid=$(basename "$m")
-    if [ -f "$m/disabled" ]; then
+    if [ -f "$UI_STATE/disabled/$mid" ] || { [ -f "$m/disabled" ] && [ ! -f "$UI_STATE/enabled/$mid" ]; }; then
       echo "$(date) skip $mid (disabled)" >> "$EV/modules.log"
       continue
     fi

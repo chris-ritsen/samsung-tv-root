@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Tizen.NUI;
@@ -13,8 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    // === v5: early-proof poll (modules can take minutes), scroll + close ===
-    private const string BuildTime = "2026-10-09T19:35Z";
+    private const string BuildTime = "2026-10-09T19:13Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -24,6 +24,13 @@ public static class GhUIAgent
     private const string Evidence = "/home/owner/share/tmp/sdk_tools/selfroot-evidence";
     private const string Mark = "/tmp/selfroot";
     private const string SafeModeFile = "/opt/usr/share/selfroot/safe-mode";
+    private const string ModuleRoot = "/opt/usr/share/selfroot/modules";
+    private const string UiRoot = "/home/owner/share/tmp/sdk_tools/selfroot-ui";
+    private const string UiModuleRoot = "/home/owner/share/tmp/sdk_tools/selfroot-ui/modules";
+    private const string UiDisabledRoot = UiModuleRoot + "/disabled";
+    private const string UiEnabledRoot = UiModuleRoot + "/enabled";
+    private const string UiSafeMode = "/home/owner/share/tmp/sdk_tools/selfroot-ui/safe-mode";
+    private const string AgentLogPath = Evidence + "/agent.log";
     private const int SessionAttempts = 18;          // 18 x 10s = 3 min for sdbd to come up
     private const string BridgeConfig = "/opt/usr/share/selfroot/bridge.conf";
     private const string BridgePortConfig = "/opt/usr/share/selfroot/bridge-port.conf";
@@ -34,18 +41,37 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "BOOT AGENT v5.1";
+    private static string Banner = "TVROOT MANAGER v5.3";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
-    private static bool Done;
-
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
     private static TextLabel HintLabel;
     private static TextLabel[] Lines = new TextLabel[20];
     private static View Bar;
     private static readonly List<string> History = new List<string>();
+    private static List<ModuleEntry> Modules = new List<ModuleEntry>();
+    private static readonly HashSet<string> PendingToggles = new HashSet<string>();
+    private static readonly string[] Pages = { "STATUS", "MODULES", "LOGS", "PAIRING" };
+    private static string ModuleLoadError;
+    private static string SnapshotSig = "";
+    private static bool SafeToggleBusy;
+    private static string BridgeStatus = "waiting for root";
+    private static string UiMessage = "";
+    private static DateTime LastUiRefreshUtc = DateTime.MinValue;
+    private static int PageIndex;
+    private static int SelectedModuleIndex;
+    private static int DisplayLineCount;
     private static int ScrollOffset;          // v5: 0 = tail, >0 = scrolled up
     private static bool UiDirty = true;        // v5: force refresh on scroll
+
+    private sealed class ModuleEntry
+    {
+        public string Id;
+        public string Name;
+        public string Version;
+        public bool Enabled;
+        public string LastResult;
+    }
 
     // v4: hold the NUI Timer in a static field. In v3.x it was a BuildUi local;
     // NUI Timer is a managed wrapper over a native handle, and with no rooted
@@ -64,6 +90,24 @@ public static class GhUIAgent
     }
     public static void Note(string text) { Note(text, 0); }
 
+    private static void AddUiEvent(string text)
+    {
+        lock (Gate) Events.Add("[" + DateTime.UtcNow.ToString("HH:mm:ss") + "] " + text);
+        Persist(text);
+    }
+
+    // M4: best-effort persistent agent log (survives reopen; tailed on LOGS).
+    private static void Persist(string text)
+    {
+        try
+        {
+            Directory.CreateDirectory(Evidence);
+            File.AppendAllText(AgentLogPath,
+                "[" + DateTime.UtcNow.ToString("o") + "] " + text + "\n");
+        }
+        catch { }
+    }
+
     private class Agent : NUIApplication
     {
         protected override void OnCreate()
@@ -71,6 +115,12 @@ public static class GhUIAgent
             base.OnCreate();
             GhUIAgent.BuildUi();
             GhUIAgent.RunChain();
+        }
+
+        protected override void OnResume()
+        {
+            base.OnResume();
+            lock (Gate) UiDirty = true;
         }
     }
 
@@ -95,7 +145,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "GH BOOT AGENT v5.1";
+        w.Title = "TVRoot Manager v5.3";
 
         BannerLabel = new TextLabel
         {
@@ -109,7 +159,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.1 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.3 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -119,7 +169,7 @@ public static class GhUIAgent
 
         var hint = new TextLabel
         {
-            Text = "self-root: Host PC IP = 127.0.0.1 | Up/Down: scroll log | Return: close",
+            Text = "Left/Right: pages | Up/Down: select or scroll | OK: toggle | Back: close",
             PointSize = 16,
             TextColor = new Color(0.6f, 0.6f, 0.6f, 1f),
             Position2D = new Position2D(120, 176),
@@ -157,8 +207,6 @@ public static class GhUIAgent
             w.Add(Lines[i]);
         }
 
-        // v5: remote keys — Up/Down scroll the full history, Return closes
-        // the app when the chain is done (or skips the wait anytime).
         w.KeyEvent += OnUiKey;
 
         _uiTimer = new Tizen.NUI.Timer(300);
@@ -170,24 +218,74 @@ public static class GhUIAgent
     {
         var name = e.Key != null ? e.Key.KeyPressedName : null;
         if (string.IsNullOrEmpty(name)) return;
+        // M4: one remote press delivers down+up; acting on both jumped two
+        // pages (or toggled twice) per press. Ignore the release phase.
+        // Deliberately only filters "up" so an unknown vocabulary can't
+        // brick the UI; held-key auto-repeat (repeated downs) still works.
+        try
+        {
+            if (e.Key.State == Tizen.NUI.Key.StateType.Up) return;
+        }
+        catch { }
+        ModuleEntry moduleToToggle = null;
+        bool safeToggle = false;
         lock (Gate)
         {
-            if (name == "Up")
+            if (name == "Left")
             {
-                ScrollOffset = System.Math.Min(ScrollOffset + 1,
-                    System.Math.Max(0, History.Count - Lines.Length));
+                PageIndex = (PageIndex + Pages.Length - 1) % Pages.Length;
+                ScrollOffset = 0;
                 UiDirty = true;
             }
-            else if (name == "Down")
+            else if (name == "Right")
+            {
+                PageIndex = (PageIndex + 1) % Pages.Length;
+                ScrollOffset = 0;
+                UiDirty = true;
+            }
+            else if (name == "Up" && PageIndex == 1 && Modules.Count > 0)
+            {
+                SelectedModuleIndex = System.Math.Max(0, SelectedModuleIndex - 1);
+                UiDirty = true;
+            }
+            else if (name == "Down" && PageIndex == 1 && Modules.Count > 0)
+            {
+                SelectedModuleIndex = System.Math.Min(Modules.Count - 1, SelectedModuleIndex + 1);
+                UiDirty = true;
+            }
+            else if (name == "Up" && PageIndex == 2)
+            {
+                ScrollOffset = System.Math.Min(ScrollOffset + 1,
+                    System.Math.Max(0, DisplayLineCount - Lines.Length));
+                UiDirty = true;
+            }
+            else if (name == "Down" && PageIndex == 2)
             {
                 ScrollOffset = System.Math.Max(0, ScrollOffset - 1);
                 UiDirty = true;
             }
-            else if (name == "Return" || name == "Exit" || name == "XF86Back")
+            else if (name == "Return" && PageIndex == 1
+                && SelectedModuleIndex >= 0 && SelectedModuleIndex < Modules.Count)
             {
-                CloseRequested = true;   // OnTick performs the exit on the UI thread
+                moduleToToggle = Modules[SelectedModuleIndex];
+            }
+            else if (name == "Return" && PageIndex == 0)
+            {
+                PageIndex = 1;
+                UiDirty = true;
+            }
+            else if (name == "Up" && PageIndex == 0)
+            {
+                safeToggle = true;   // STATUS: couch safe-mode toggle (next boot)
+            }
+            else if (name == "Back" || name == "Exit" || name == "Escape"
+                || name == "XF86Back")
+            {
+                CloseRequested = true;
             }
         }
+        if (moduleToToggle != null) ToggleModule(moduleToToggle);
+        if (safeToggle) ToggleSafeMode();
     }
 
     private static bool CloseRequested;
@@ -204,13 +302,20 @@ public static class GhUIAgent
 
     private static bool OnTick(object sender, Tizen.NUI.Timer.TickEventArgs e)
     {
+        RefreshModuleSnapshot();
         List<string> pending = null;
+        List<string> history;
+        List<ModuleEntry> modules;
         double progress;
         string banner;
         Color bannerColor;
-        bool done;
         bool dirty;
         int scroll;
+        int page;
+        int selected;
+        string moduleLoadError;
+        string bridgeStatus;
+        string uiMessage;
         lock (Gate)
         {
             if (Events.Count > 0)
@@ -223,24 +328,31 @@ public static class GhUIAgent
             progress = Progress;
             banner = Banner;
             bannerColor = BannerColor;
-            done = Done;
-            dirty = UiDirty;
+            dirty = UiDirty || pending != null;
             scroll = ScrollOffset;
+            page = PageIndex;
+            selected = SelectedModuleIndex;
+            modules = new List<ModuleEntry>(Modules);
+            history = new List<string>(History);
+            moduleLoadError = ModuleLoadError;
+            bridgeStatus = BridgeStatus;
+            uiMessage = UiMessage;
             UiDirty = false;
         }
-        if (pending != null || dirty)
+        if (dirty)
         {
-            // window over the full history; ScrollOffset counts back from tail
-            int total = History.Count;
-            int start = System.Math.Max(0, total - Lines.Length - scroll);
+            var pageLines = BuildPageLines(
+                page, banner, modules, history, selected, moduleLoadError, bridgeStatus, uiMessage);
+            int start = page == 1
+                ? ModulePageStart(modules.Count, selected)
+                : System.Math.Max(0, pageLines.Count - Lines.Length - scroll);
+            lock (Gate) DisplayLineCount = pageLines.Count;
             for (int i = 0; i < Lines.Length; i++)
             {
                 int idx = start + i;
-                Lines[i].Text = idx < total ? History[idx] : "";
+                Lines[i].Text = idx < pageLines.Count ? pageLines[idx] : "";
             }
-            HintLabel.Text = scroll > 0
-                ? $"scrolled {scroll} up | Down: newer | Return: close"
-                : "Up: scroll log | Return: close";
+            HintLabel.Text = BuildHint(page, scroll);
         }
         if (BannerLabel.Text != banner) BannerLabel.Text = banner;
         if (bannerColor != BannerLabel.TextColor) BannerLabel.TextColor = bannerColor;
@@ -251,7 +363,377 @@ public static class GhUIAgent
             RequestExit();
             return false;
         }
-        return !done;
+        return true;
+    }
+
+    private static string BuildHint(int page, int scroll)
+    {
+        if (page == 1) return Pages[page] + " | Left/Right: pages | Up/Down: choose | OK: toggle for next boot | Back: close";
+        if (page == 2) return Pages[page] + " | Left/Right: pages | Up/Down: scroll | Back: close";
+        if (scroll > 0) return Pages[page] + " | Left/Right: pages | Down: newer | Back: close";
+        return Pages[page] + " | Up: safe-mode | OK: modules | Left/Right: pages | Back: close";
+    }
+
+    private static void RefreshModuleSnapshot()
+    {
+        if ((DateTime.UtcNow - LastUiRefreshUtc).TotalSeconds < 1.0) return;
+        LastUiRefreshUtc = DateTime.UtcNow;
+        List<ModuleEntry> modules;
+        string error = null;
+        try
+        {
+            modules = LoadModules();
+        }
+        catch (Exception exception)
+        {
+            modules = new List<ModuleEntry>();
+            error = exception.GetType().Name + ": " + exception.Message;
+        }
+        var sig = new StringBuilder();
+        sig.Append(error).Append('|');
+        foreach (var module in modules)
+            sig.Append(module.Id).Append(module.Enabled ? '1' : '0').Append(module.LastResult).Append(';');
+        lock (Gate)
+        {
+            Modules = modules;
+            ModuleLoadError = error;
+            // M4: only repaint when the snapshot actually changed (was: every
+            // second, churning all 20 labels and causing visible flicker).
+            if (SnapshotSig != sig.ToString()) { SnapshotSig = sig.ToString(); UiDirty = true; }
+            if (SelectedModuleIndex >= Modules.Count) SelectedModuleIndex = System.Math.Max(0, Modules.Count - 1);
+        }
+    }
+
+    private static List<ModuleEntry> LoadModules()
+    {
+        var modules = new List<ModuleEntry>();
+        if (!Directory.Exists(ModuleRoot)) return modules;
+        var moduleLog = ReadTailLines(Evidence + "/modules.log", 1000);
+        foreach (var directory in Directory.GetDirectories(ModuleRoot))
+        {
+            var id = System.IO.Path.GetFileName(directory);
+            if (!Regex.IsMatch(id, "^[a-zA-Z0-9][a-zA-Z0-9._-]*$")) continue;
+            if (!File.Exists(System.IO.Path.Combine(directory, "boot.sh"))) continue;
+            var metadataPath = System.IO.Path.Combine(directory, "module.json");
+            var metadata = File.Exists(metadataPath) ? File.ReadAllText(metadataPath) : "";
+            var baseDisabled = File.Exists(System.IO.Path.Combine(directory, "disabled"));
+            var uiDisabled = File.Exists(System.IO.Path.Combine(UiDisabledRoot, id));
+            var uiEnabled = File.Exists(System.IO.Path.Combine(UiEnabledRoot, id));
+            modules.Add(new ModuleEntry
+            {
+                Id = id,
+                Name = JsonString(metadata, "name", id),
+                Version = JsonString(metadata, "version", "?"),
+                Enabled = !uiDisabled && (uiEnabled || !baseDisabled),
+                LastResult = LastModuleResult(moduleLog, id),
+            });
+        }
+        modules.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+        return modules;
+    }
+
+    private static string JsonString(string json, string key, string fallback)
+    {
+        var pattern = "\"" + Regex.Escape(key) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"";
+        var match = Regex.Match(json, pattern);
+        if (!match.Success) return fallback;
+        return match.Groups[1].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
+    }
+
+    private static string LastModuleResult(List<string> lines, string id)
+    {
+        for (int i = lines.Count - 1; i >= 0; i--)
+        {
+            var exitMarker = " " + id + " exit=";
+            var exitIndex = lines[i].IndexOf(exitMarker, StringComparison.Ordinal);
+            if (exitIndex >= 0) return "exit=" + lines[i].Substring(exitIndex + exitMarker.Length).Trim();
+            if (lines[i].IndexOf(" skip " + id + " (disabled)", StringComparison.Ordinal) >= 0) return "skipped";
+        }
+        return "no run yet";
+    }
+
+    private static void ToggleModule(ModuleEntry module)
+    {
+        bool enabled = !module.Enabled;
+        lock (Gate)
+        {
+            if (!PendingToggles.Add(module.Id)) return;
+        }
+        Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(UiDisabledRoot);
+                Directory.CreateDirectory(UiEnabledRoot);
+                var disabledPath = System.IO.Path.Combine(UiDisabledRoot, module.Id);
+                var enabledPath = System.IO.Path.Combine(UiEnabledRoot, module.Id);
+                if (enabled)
+                {
+                    File.WriteAllText(enabledPath, DateTime.UtcNow.ToString("o"));
+                    if (File.Exists(disabledPath)) File.Delete(disabledPath);
+                }
+                else
+                {
+                    File.WriteAllText(disabledPath, DateTime.UtcNow.ToString("o"));
+                    if (File.Exists(enabledPath)) File.Delete(enabledPath);
+                }
+                lock (Gate) UiMessage = module.Name + " " + (enabled ? "enabled" : "disabled") + " for next boot";
+                AddUiEvent("module " + module.Id + " set " + (enabled ? "enabled" : "disabled") + " for next boot");
+            }
+            catch (Exception error)
+            {
+                lock (Gate) UiMessage = "Toggle failed: " + error.GetType().Name;
+                AddUiEvent("module toggle failed: " + error.GetType().Name);
+            }
+            finally
+            {
+                lock (Gate)
+                {
+                    PendingToggles.Remove(module.Id);
+                    UiDirty = true;
+                }
+            }
+        });
+    }
+
+    // M4: couch safe-mode toggle (STATUS page, Up). Writes a marker in the
+    // app-writable UI dir; RunChain honors it like the flag file, next boot.
+    // Recovery without the manager: sdb shell rm <marker> (dir is 777), or
+    // delete it over the bridge from the desktop.
+    private static void ToggleSafeMode()
+    {
+        lock (Gate)
+        {
+            if (SafeToggleBusy) return;
+            SafeToggleBusy = true;
+        }
+        Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(UiRoot);
+                bool on;
+                if (File.Exists(UiSafeMode)) { File.Delete(UiSafeMode); on = false; }
+                else { File.WriteAllText(UiSafeMode, DateTime.UtcNow.ToString("o")); on = true; }
+                var msg = on
+                    ? "safe mode ON for next boot (toggle again, or rm selfroot-ui/safe-mode, to undo)"
+                    : "safe mode off for next boot";
+                lock (Gate) UiMessage = msg;
+                AddUiEvent(msg);
+            }
+            catch (Exception error)
+            {
+                lock (Gate) UiMessage = "Safe-mode toggle failed: " + error.GetType().Name;
+                AddUiEvent("safe-mode toggle failed: " + error.GetType().Name);
+            }
+            finally { lock (Gate) { SafeToggleBusy = false; UiDirty = true; } }
+        });
+    }
+
+    private static List<string> BuildPageLines(
+        int page,
+        string banner,
+        List<ModuleEntry> modules,
+        List<string> history,
+        int selected,
+        string moduleLoadError,
+        string bridgeStatus,
+        string uiMessage)
+    {
+        var lines = new List<string>();
+        if (page == 0)
+        {
+            int enabledCount = 0;
+            foreach (var module in modules) if (module.Enabled) enabledCount++;
+            lines.Add("ROOT STATUS: " + banner);
+            lines.Add("Last proof: " + LastProofTime());
+            lines.Add("SDB bridge: " + bridgeStatus + " (port " + BridgePort() + ")");
+            lines.Add("Bridge token hint: " + BridgeTokenHint());
+            lines.Add("Safe mode: " + SafeModeText() + "  (Up toggles, next boot)");
+            lines.Add("Modules: " + enabledCount + "/" + modules.Count + " enabled; changes apply next boot");
+            if (!string.IsNullOrEmpty(moduleLoadError)) lines.Add("Module scan: " + moduleLoadError);
+            if (!string.IsNullOrEmpty(uiMessage)) lines.Add(uiMessage);
+            lines.Add("");
+            lines.Add("Use Left/Right to open MODULES, LOGS, or PAIRING.");
+        }
+        else if (page == 1)
+        {
+            lines.Add("MODULES  |  OK toggles the selected module for the next boot");
+            if (!string.IsNullOrEmpty(moduleLoadError)) lines.Add("Module scan failed: " + moduleLoadError);
+            else if (modules.Count == 0) lines.Add("No module directories found.");
+            for (int i = 0; i < modules.Count; i++)
+            {
+                var module = modules[i];
+                lines.Add((i == selected ? "> " : "  ") + (module.Enabled ? "ON  " : "OFF ")
+                    + module.Name + " v" + module.Version + " | " + module.LastResult);
+            }
+            if (!string.IsNullOrEmpty(uiMessage)) lines.Add(uiMessage);
+            lines.Add("");
+            lines.Add("Changes are saved now and take effect after reboot.");
+        }
+        else if (page == 2)
+        {
+            lines.Add("MODULE RUNNER (latest entries)");
+            AppendFileTail(lines, Evidence + "/modules.log", "modules.log", 18);
+            foreach (var module in modules)
+            {
+                var path = Evidence + "/module-" + module.Id + ".log";
+                if (!File.Exists(path)) continue;
+                lines.Add("[" + module.Id + "]");
+                AppendTail(lines, path, 3);
+            }
+            lines.Add("[bridge.log]");
+            AppendTail(lines, Evidence + "/bridge.log", 8);
+            lines.Add("[agent.log - persistent]");
+            var agentTail = ReadTailLines(AgentLogPath, 25);
+            if (agentTail.Count == 0) lines.Add("(empty)");
+            else lines.AddRange(agentTail);
+            lines.Add("[this session - latest]");
+            if (history.Count == 0) lines.Add("(no events yet)");
+            else for (int i = System.Math.Max(0, history.Count - 15); i < history.Count; i++) lines.Add(history[i]);
+        }
+        else
+        {
+            var token = BridgeToken();
+            var host = LocalIpv4();
+            lines.Add("PAIR THIS TV WITH THE DESKTOP MANAGER");
+            lines.Add("TV address: " + host);
+            lines.Add("Bridge port: " + BridgePort());
+            lines.Add("Pairing token: " + (token.Length == 0 ? "not configured" : token));
+            lines.Add("Pairing URI:");
+            lines.Add("tvroot://" + host + ":" + BridgePort() + "/" + token);
+            lines.Add("");
+            lines.Add("This bearer token grants SDB access; keep it private.");
+        }
+        return lines;
+    }
+
+    private static int ModulePageStart(int count, int selected)
+    {
+        int visibleRows = System.Math.Max(1, Lines.Length - 4);
+        return System.Math.Max(0, System.Math.Min(selected - visibleRows + 1, count - visibleRows));
+    }
+
+    private static void AppendFileTail(List<string> output, string path, string heading, int count)
+    {
+        output.Add("[" + heading + "]");
+        AppendTail(output, path, count);
+    }
+
+    private static void AppendTail(List<string> output, string path, int count)
+    {
+        foreach (var line in ReadTailLines(path, count)) output.Add(line);
+    }
+
+    private static List<string> ReadTailLines(string path, int count)
+    {
+        var tail = new Queue<string>();
+        try
+        {
+            using (var reader = new StreamReader(path))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (tail.Count == count) tail.Dequeue();
+                    tail.Enqueue(line);
+                }
+            }
+        }
+        catch { }
+        return new List<string>(tail);
+    }
+
+    private static string SafeModeText()
+    {
+        bool flag = false, ui = false;
+        try { flag = File.Exists(SafeModeFile); } catch { }
+        try { ui = File.Exists(UiSafeMode); } catch { }
+        if (flag && ui) return "ON (flag file + couch)";
+        if (flag) return "ON (flag file)";
+        if (ui) return "ON (couch override)";
+        return "off";
+    }
+
+    private static int BridgePort()
+    {
+        try
+        {
+            int port;
+            return File.Exists(BridgePortConfig)
+                && int.TryParse(File.ReadAllText(BridgePortConfig).Trim(), out port)
+                ? port : DefaultBridgePort;
+        }
+        catch { return DefaultBridgePort; }
+    }
+
+    private static string BridgeToken()
+    {
+        try { return File.ReadAllText(BridgeConfig).Trim(); }
+        catch { return ""; }
+    }
+
+    private static string BridgeTokenHint()
+    {
+        var token = BridgeToken();
+        return token.Length >= 6 ? "******" + token.Substring(token.Length - 6) : "not configured";
+    }
+
+    private static string LastProofTime()
+    {
+        try
+        {
+            var path = Evidence + "/selfroot-proof.txt";
+            return File.Exists(path) ? File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm:ss") : "not recorded";
+        }
+        catch { return "unavailable"; }
+    }
+
+    private static string LocalIpv4()
+    {
+        try
+        {
+            using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+            {
+                socket.Connect(IPAddress.Parse("192.0.2.1"), 9);
+                return ((IPEndPoint)socket.LocalEndPoint).Address.ToString();
+            }
+        }
+        catch { return "unknown"; }
+    }
+
+    private static DateTime BootTimeUtc()
+    {
+        try
+        {
+            foreach (var line in File.ReadAllLines("/proc/stat"))
+            {
+                if (!line.StartsWith("btime ", StringComparison.Ordinal)) continue;
+                long seconds;
+                if (long.TryParse(line.Substring(6).Trim(), out seconds))
+                    return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(seconds);
+            }
+        }
+        catch { }
+        return DateTime.MinValue;
+    }
+
+    // M4: true when this boot already rooted (proof newer than boot time).
+    private static bool FreshProofThisBoot(out string proofText)
+    {
+        proofText = null;
+        try
+        {
+            var path = Evidence + "/selfroot-proof.txt";
+            if (!File.Exists(path)) return false;
+            var boot = BootTimeUtc();
+            if (boot != DateTime.MinValue && File.GetLastWriteTimeUtc(path) < boot) return false;
+            var text = File.ReadAllText(path);
+            if (text.IndexOf("SELFROOT-PROOF uid=0", StringComparison.Ordinal) < 0) return false;
+            proofText = text;
+            return true;
+        }
+        catch { return false; }
     }
 
     public static void RunChain()
@@ -280,7 +762,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("agent v3 boot - " + status, 0.02);
+                Note("manager v5.3 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
@@ -343,15 +825,42 @@ public static class GhUIAgent
                     BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
                 }
 
-                // v4: safe mode — flag file skips the chain and the bridge.
-                if (File.Exists(SafeModeFile))
+                // M4: reopen fast-path — this boot already rooted (fresh
+                // proof newer than boot): skip the injection, go green,
+                // restart the bridge. This is what makes the manager
+                // re-openable as an app instead of a boot-only splash.
+                string existingProof;
+                if (FreshProofThisBoot(out existingProof))
                 {
-                    Note("safe-mode flag present: " + SafeModeFile, 0.0);
+                    Note("this boot already rooted - chain skipped (fast-path)", 1.0);
+                    Persist("fast-path: fresh proof from this boot, chain skipped");
+                    try { Note("PROOF:\n" + existingProof, 1.0); } catch { }
+                    lock (Gate)
+                    {
+                        Banner = "ROOT ACQUIRED - UNTETHERED";
+                        BannerColor = new Color(0.2f, 1f, 0.3f, 1f);
+                        Progress = 1.0;
+                    }
+                    StartBridge();
+                    return;
+                }
+
+                // v4: safe mode — flag file (or the couch override from the
+                // STATUS page) skips the chain and the bridge, next boot.
+                bool uiSafe = false;
+                try { uiSafe = File.Exists(UiSafeMode); } catch { }
+                if (File.Exists(SafeModeFile) || uiSafe)
+                {
+                    var safeMsg = "safe-mode present ("
+                        + (uiSafe ? "couch override" : SafeModeFile)
+                        + "): chain skipped";
+                    Note(safeMsg, 0.0);
+                    Persist(safeMsg);
                     lock (Gate)
                     {
                         Banner = "SAFE MODE - CHAIN SKIPPED";
                         BannerColor = new Color(1f, 0.6f, 0.2f, 1f);
-                        Done = true;
+                        BridgeStatus = "not started (safe mode)";
                     }
                     return;
                 }
@@ -386,7 +895,7 @@ public static class GhUIAgent
                     {
                         Banner = "SKIPPED - DEV IP NOT 127.0.0.1?";
                         BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
-                        Done = true;
+                        BridgeStatus = "not started (no sdb session)";
                     }
                     return;
                 }
@@ -483,11 +992,11 @@ public static class GhUIAgent
                     if (proof)
                     {
                         try { Note("PROOF:\n" + proofText, 1.0); } catch { }
+                        Persist("root proof acquired via chain");
                         lock (Gate)
                         {
                             Banner = "ROOT ACQUIRED - UNTETHERED";
                             BannerColor = new Color(0.2f, 1f, 0.3f, 1f);
-                            Done = true;
                             Progress = 1.0;
                         }
                         StartBridge();
@@ -498,8 +1007,9 @@ public static class GhUIAgent
                 {
                     Banner = "NO FRESH PROOF AFTER 6 MIN";
                     BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
-                    Done = true;
+                    BridgeStatus = "not started (root proof missing)";
                 }
+                Persist("no fresh proof after 6 min");
                 Note("next boot retries automatically", 0);
             }
             catch (Exception e)
@@ -508,8 +1018,9 @@ public static class GhUIAgent
                 {
                     Banner = "AGENT ERROR";
                     BannerColor = new Color(0.9f, 0.3f, 0.2f, 1f);
-                    Done = true;
+                    BridgeStatus = "agent error";
                 }
+                Persist("EXCEPTION " + e.GetType().Name + ": " + e.Message);
                 Note("EXCEPTION " + e.GetType().Name + ": " + e.Message, 0);
             }
         });
@@ -538,12 +1049,22 @@ public static class GhUIAgent
 
             var listener = new TcpListener(IPAddress.Any, bridgePort);
             listener.Start(8);
-            Note("sdb bridge listening on port " + bridgePort);
+            lock (Gate)
+            {
+                BridgeStatus = "listening";
+                UiDirty = true;
+            }
+            AddUiEvent("sdb bridge listening on port " + bridgePort);
             Task.Run(() => AcceptBridgeClients(listener, token));
         }
         catch (Exception error)
         {
-            Note("bridge unavailable: " + error.GetType().Name + ": " + error.Message);
+            lock (Gate)
+            {
+                BridgeStatus = "unavailable: " + error.GetType().Name;
+                UiDirty = true;
+            }
+            AddUiEvent("bridge unavailable: " + error.GetType().Name + ": " + error.Message);
         }
     }
 
@@ -685,7 +1206,7 @@ public static class GhUIAgent
             }
             catch { }
         }
-        Note("bridge " + message);
+        AddUiEvent("bridge " + message);
     }
 
     private static byte[] Frame(string cmd, uint arg0, uint arg1, byte[] data)

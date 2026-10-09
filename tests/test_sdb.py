@@ -90,7 +90,8 @@ def test_sdb_client_connects_through_local_bridge_proxy(monkeypatch) -> None:
     client.disconnect()
 
     assert serial.startswith("127.0.0.1:")
-    assert calls == [("connect", serial), ("disconnect", serial)]
+    # connect() sweeps stale loopback devices before connecting.
+    assert calls == [("devices",), ("connect", serial), ("disconnect", serial)]
 
 
 def test_require_device_accepts_ready_serial(monkeypatch) -> None:
