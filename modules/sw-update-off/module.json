@@ -1,0 +1,9 @@
+{
+  "id": "sw-update-off",
+  "name": "Disable firmware OTA and app background updates",
+  "version": "1.0.0",
+  "description": "Kills SWUAutoUpgrade, fw-update-service (incl. USB path) and was_background_update at every boot via vendor opt-out flag, runtime masks and a kill sweep. An OTA would wipe the root; owner policy is no updates ever.",
+  "author": "levkropp",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}
