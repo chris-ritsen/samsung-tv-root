@@ -21,6 +21,11 @@
 # Disabled state: touch <module dir>/disabled (watchdog exits <30s;
 # revival needs a reboot) — or toggle in the on-TV manager.
 # Undo units (run once as root): systemctl unmask --runtime <unit>
+# Manager visibility: the agent (SMACK User::Pkg::*) can only read files
+# labeled User::App::Shared here (root-created files land as User and are
+# invisible to it — "No module directories found" with no error). Re-apply
+# the readable label every boot in case anything relabels the tree.
+chsmack -r -a 'User::App::Shared' /opt/usr/share/selfroot/modules 2>/dev/null
 # Vendor opt-out switches: the bms / voice-app / ondevice-voice starter
 # units skip when the matching path exists under
 # /opt/usr/share/systemd/system (negated ConditionPathExists) — persistent
