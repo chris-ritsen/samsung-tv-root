@@ -64,7 +64,7 @@ for p in bms.path \
     systemctl mask --runtime "$p" >/dev/null 2>&1
     systemctl stop "$p" >/dev/null 2>&1
 done
-PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|/csfs|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
+PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
 POOL=$(ps -ef | grep "launchpad-process-pool" | grep -v grep | tr -s " " | cut -d" " -f2 | head -1)
 sweep() {
     PIDS=$(ps -ef | grep -E "$PATTERNS" | grep -v grep | tr -s " " | cut -d" " -f2)
@@ -82,7 +82,8 @@ UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-tele
     PIDS=$(ps -ef | grep -E "$PATTERNS" | grep -v grep | tr -s " " | cut -d" " -f2)
     for pid in $PIDS; do
         if [ "$pid" != "$$" ] && [ "$pid" != "1" ] && [ "$pid" != "$POOL" ]; then
-            kill -9 "$pid" >/dev/null 2>&1 && echo "$(date '+%T') watchdog killed $pid" >> "$EVIDENCE/module-samsung-telemetry-off-watchdog.log"
+            cmd=$(tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null | cut -c1-60)
+            kill -9 "$pid" >/dev/null 2>&1 && echo "$(date '+%T') watchdog killed $pid $cmd" >> "$EVIDENCE/module-samsung-telemetry-off-watchdog.log"
         fi
     done
     sleep 30

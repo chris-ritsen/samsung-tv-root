@@ -31,7 +31,17 @@ for u in adagent-service \
          com.samsung.tv.context-aware-service \
          com.samsung.tv.cis-api-service-app; do
     systemctl mask --runtime "$u.service" >/dev/null 2>&1
-    systemctl stop "$u.service" >/dev/null 2>&1
+    systemctl stop "$u.service" >/dev/null 2>&1 &
+done
+wait
+for u in adagent-service \
+         pisa-service \
+         canalysis-service \
+         slive-provider-daemon \
+         contents-recognition-service \
+         com.samsung.tv.context-aware-agent \
+         com.samsung.tv.context-aware-service \
+         com.samsung.tv.cis-api-service-app; do
     printf '%s -> %s\n' "$u" "$(systemctl is-active "$u.service" 2>&1)"
 done
 exit 0
