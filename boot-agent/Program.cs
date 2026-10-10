@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-09T19:13Z";
+    private const string BuildTime = "2026-10-10T09:15Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -41,7 +41,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.3";
+    private static string Banner = "TVROOT MANAGER v5.5";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -145,7 +145,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.3";
+        w.Title = "TVRoot Manager v5.5";
 
         BannerLabel = new TextLabel
         {
@@ -159,7 +159,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.3 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.5 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -416,9 +416,9 @@ public static class GhUIAgent
             if (!File.Exists(System.IO.Path.Combine(directory, "boot.sh"))) continue;
             var metadataPath = System.IO.Path.Combine(directory, "module.json");
             var metadata = File.Exists(metadataPath) ? File.ReadAllText(metadataPath) : "";
-            var baseDisabled = File.Exists(System.IO.Path.Combine(directory, "disabled"));
-            var uiDisabled = File.Exists(System.IO.Path.Combine(UiDisabledRoot, id));
-            var uiEnabled = File.Exists(System.IO.Path.Combine(UiEnabledRoot, id));
+            var baseDisabled = MarkerPresent(System.IO.Path.Combine(directory, "disabled"));
+            var uiDisabled = MarkerPresent(System.IO.Path.Combine(UiDisabledRoot, id));
+            var uiEnabled = MarkerPresent(System.IO.Path.Combine(UiEnabledRoot, id));
             modules.Add(new ModuleEntry
             {
                 Id = id,
@@ -430,6 +430,15 @@ public static class GhUIAgent
         }
         modules.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
         return modules;
+    }
+
+    // M4: empty marker files count as absent. Root pre-creates all markers
+    // (the app cannot create files here) and the toggle only ever
+    // overwrites/truncates, so empty == no override from anyone.
+    private static bool MarkerPresent(string path)
+    {
+        try { return File.Exists(path) && new FileInfo(path).Length > 0; }
+        catch { return false; }
     }
 
     private static string JsonString(string json, string key, string fallback)
@@ -470,12 +479,12 @@ public static class GhUIAgent
                 if (enabled)
                 {
                     File.WriteAllText(enabledPath, DateTime.UtcNow.ToString("o"));
-                    if (File.Exists(disabledPath)) File.Delete(disabledPath);
+                    ClearMarker(disabledPath);
                 }
                 else
                 {
                     File.WriteAllText(disabledPath, DateTime.UtcNow.ToString("o"));
-                    if (File.Exists(enabledPath)) File.Delete(enabledPath);
+                    ClearMarker(enabledPath);
                 }
                 lock (Gate) UiMessage = module.Name + " " + (enabled ? "enabled" : "disabled") + " for next boot";
                 AddUiEvent("module " + module.Id + " set " + (enabled ? "enabled" : "disabled") + " for next boot");
@@ -528,6 +537,20 @@ public static class GhUIAgent
             }
             finally { lock (Gate) { SafeToggleBusy = false; UiDirty = true; } }
         });
+    }
+
+    // M4: delete, but fall back to truncating to empty (== absent). The app
+    // may lack delete rights where it has overwrite rights; either way the
+    // opposite side must not keep a live marker.
+    private static void ClearMarker(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+            return;
+        }
+        catch { }
+        try { File.WriteAllText(path, ""); } catch { }
     }
 
     private static List<string> BuildPageLines(
@@ -762,7 +785,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.3 boot - " + status, 0.02);
+                Note("manager v5.5 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {

@@ -55,7 +55,9 @@ rm -rf "$UI_STATE"
 mkdir -p "$UI_STATE/enabled" "$UI_STATE/disabled"
 for state in enabled disabled; do
   for marker in "$UI_MODS/$state/"*; do
-    [ -f "$marker" ] || continue
+    # -s (non-empty) only: root pre-creates all markers empty (== absent)
+    # because the app cannot create files; the toggle overwrites/truncates.
+    [ -s "$marker" ] || continue
     touch "$UI_STATE/$state/$(basename "$marker")"
   done
 done
