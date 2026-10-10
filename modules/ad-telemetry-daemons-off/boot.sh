@@ -10,6 +10,18 @@
 #
 # Disabled state: touch <module dir>/disabled
 # Undo (run once as root): systemctl unmask --runtime <unit>; systemctl start <unit>
+# Vendor opt-out switches (negated ConditionPathExists in the unit files):
+# touching the matching path under /opt/usr/share/systemd/system keeps the
+# unit from starting at all — persistent, no mask needed, trivially reverted
+# by deleting the file. Masks are still applied as belt-and-braces (they
+# also block manual/dbus starts).
+OPTOUT=/opt/usr/share/systemd/system
+mkdir -p $OPTOUT 2>/dev/null
+for o in pisa-service canalysis-daemon slive-provider-daemon \
+         com.samsung.tv.context-aware-agent \
+         com.samsung.tv.context-aware-service; do
+    touch $OPTOUT/$o 2>/dev/null
+done
 for u in adagent-service \
          pisa-service \
          canalysis-service \
