@@ -1,7 +1,7 @@
 {
   "id": "samsung-telemetry-off",
   "name": "Disable Samsung telemetry, ACR, voice and account services",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Masks data-service/pushd/bms/appbinary-manager units, plants vendor opt-out switches, kills the ACR service app, Bixby/voice stack, SSO and CIS processes at every boot, supervises a 30s watchdog, and hijacks the TVPlus button into the manager. Disable via the manager or the disabled flag; revival needs a reboot.",
   "author": "levkropp",
   "scripts": { "boot": "boot.sh" },

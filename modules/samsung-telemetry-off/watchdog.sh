@@ -8,7 +8,7 @@ PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-
 POOL=$(ps -ef | grep "launchpad-process-pool" | grep -v grep | tr -s " " | cut -d" " -f2 | head -1)
 UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
 while true; do
-    if [ -f "$MODULE_DIR/disabled" ] || [ -f "$UIDIS" ]; then sleep 30; continue; fi
+    if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then sleep 30; continue; fi
     PIDS=$(ps -ef | grep -E "$PATTERNS" | grep -v grep | tr -s " " | cut -d" " -f2)
     for pid in $PIDS; do
         if [ "$pid" != "$$" ] && [ "$pid" != "1" ] && [ "$pid" != "$POOL" ]; then

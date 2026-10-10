@@ -42,7 +42,7 @@ EVIDENCE=${EVIDENCE:-/home/owner/share/tmp/sdk_tools/selfroot-evidence}
 UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
 chsmack -r -a 'User::App::Shared' /opt/usr/share/selfroot/modules 2>/dev/null
 
-if [ -f "$MODULE_DIR/disabled" ] || [ -f "$UIDIS" ]; then
+if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
     systemctl stop tvroot-watchdog.service tvroot-hijack.service >/dev/null 2>&1
     exit 0
 fi
