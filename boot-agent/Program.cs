@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-10T09:25Z";
+    private const string BuildTime = "2026-10-10T10:05Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -41,7 +41,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.6";
+    private static string Banner = "TVROOT MANAGER v5.7";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -147,7 +147,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.6";
+        w.Title = "TVRoot Manager v5.7";
 
         BannerLabel = new TextLabel
         {
@@ -161,7 +161,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.6 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.7 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -220,6 +220,14 @@ public static class GhUIAgent
     {
         var name = e.Key != null ? e.Key.KeyPressedName : null;
         if (string.IsNullOrEmpty(name)) return;
+        // v5.7: log every physical key name (remote recon: which names do
+        // dedicated buttons like TVPlus deliver, and do they reach apps?).
+        try
+        {
+            Directory.CreateDirectory(Evidence);
+            File.AppendAllText(AgentLogPath, "[" + DateTime.UtcNow.ToString("o") + "] [key] " + name + "\n");
+        }
+        catch { }
         // M4: one remote press delivers down+up; acting on both jumped two
         // pages (or toggled twice) per press. Ignore the release phase.
         // Deliberately only filters "up" so an unknown vocabulary can't
@@ -844,7 +852,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.6 boot - " + status, 0.02);
+                Note("manager v5.7 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
