@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-10T11:35Z";
+    private const string BuildTime = "2026-10-10T11:50Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -41,7 +41,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.9";
+    private static string Banner = "TVROOT MANAGER v5.10";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -147,7 +147,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.9";
+        w.Title = "TVRoot Manager v5.10";
 
         BannerLabel = new TextLabel
         {
@@ -161,7 +161,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.9 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.10 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -287,12 +287,6 @@ public static class GhUIAgent
             else if (name == "Up" && PageIndex == 0)
             {
                 safeToggle = true;   // STATUS: couch safe-mode toggle (next boot)
-            }
-            else if (name == "XF86Disney")
-            {
-                PageIndex = 0;   // Disney+ button: jump home (hijack resolves
-                ScrollOffset = 0;   // outside presses into a manager launch)
-                UiDirty = true;
             }
             else if (name == "Back" || name == "Exit" || name == "Escape"
                 || name == "XF86Back")
@@ -858,7 +852,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.9 boot - " + status, 0.02);
+                Note("manager v5.10 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
