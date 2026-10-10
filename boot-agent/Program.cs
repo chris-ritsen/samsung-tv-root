@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-10T09:15Z";
+    private const string BuildTime = "2026-10-10T09:25Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -41,7 +41,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.5";
+    private static string Banner = "TVROOT MANAGER v5.6";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -57,6 +57,7 @@ public static class GhUIAgent
     private static bool SafeToggleBusy;
     private static string BridgeStatus = "waiting for root";
     private static string UiMessage = "";
+    private static DateTime UiMessageUntilUtc = DateTime.MinValue;
     private static DateTime LastUiRefreshUtc = DateTime.MinValue;
     private static int PageIndex;
     private static int SelectedModuleIndex;
@@ -69,6 +70,7 @@ public static class GhUIAgent
         public string Id;
         public string Name;
         public string Version;
+        public string Description;
         public bool Enabled;
         public string LastResult;
     }
@@ -145,7 +147,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.5";
+        w.Title = "TVRoot Manager v5.6";
 
         BannerLabel = new TextLabel
         {
@@ -159,7 +161,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.5 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.6 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -316,6 +318,7 @@ public static class GhUIAgent
         string moduleLoadError;
         string bridgeStatus;
         string uiMessage;
+        DateTime uiMessageUntil;
         lock (Gate)
         {
             if (Events.Count > 0)
@@ -337,12 +340,21 @@ public static class GhUIAgent
             moduleLoadError = ModuleLoadError;
             bridgeStatus = BridgeStatus;
             uiMessage = UiMessage;
+            uiMessageUntil = UiMessageUntilUtc;
             UiDirty = false;
+        }
+        // M4: transient confirmations live 5s, then are consumed so the UI
+        // falls back (module description) with a single repaint, not a loop.
+        if (!string.IsNullOrEmpty(uiMessage) && DateTime.UtcNow >= uiMessageUntil)
+        {
+            lock (Gate) { UiMessage = ""; UiDirty = true; }
+            uiMessage = "";
+            dirty = true;
         }
         if (dirty)
         {
             var pageLines = BuildPageLines(
-                page, banner, modules, history, selected, moduleLoadError, bridgeStatus, uiMessage);
+                page, banner, modules, history, selected, moduleLoadError, bridgeStatus, uiMessage, uiMessageUntil);
             int start = page == 1
                 ? ModulePageStart(modules.Count, selected)
                 : System.Math.Max(0, pageLines.Count - Lines.Length - scroll);
@@ -424,6 +436,7 @@ public static class GhUIAgent
                 Id = id,
                 Name = JsonString(metadata, "name", id),
                 Version = JsonString(metadata, "version", "?"),
+                Description = JsonString(metadata, "description", ""),
                 Enabled = !uiDisabled && (uiEnabled || !baseDisabled),
                 LastResult = LastModuleResult(moduleLog, id),
             });
@@ -486,12 +499,20 @@ public static class GhUIAgent
                     File.WriteAllText(disabledPath, DateTime.UtcNow.ToString("o"));
                     ClearMarker(enabledPath);
                 }
-                lock (Gate) UiMessage = module.Name + " " + (enabled ? "enabled" : "disabled") + " for next boot";
+                lock (Gate)
+                {
+                    UiMessage = module.Name + " " + (enabled ? "enabled" : "disabled") + " for next boot";
+                    UiMessageUntilUtc = DateTime.UtcNow.AddSeconds(5);
+                }
                 AddUiEvent("module " + module.Id + " set " + (enabled ? "enabled" : "disabled") + " for next boot");
             }
             catch (Exception error)
             {
-                lock (Gate) UiMessage = "Toggle failed: " + error.GetType().Name;
+                lock (Gate)
+                {
+                    UiMessage = "Toggle failed: " + error.GetType().Name;
+                    UiMessageUntilUtc = DateTime.UtcNow.AddSeconds(5);
+                }
                 AddUiEvent("module toggle failed: " + error.GetType().Name);
             }
             finally
@@ -527,12 +548,16 @@ public static class GhUIAgent
                 var msg = on
                     ? "safe mode ON for next boot (toggle again, or rm selfroot-ui/safe-mode, to undo)"
                     : "safe mode off for next boot";
-                lock (Gate) UiMessage = msg;
+                lock (Gate) { UiMessage = msg; UiMessageUntilUtc = DateTime.UtcNow.AddSeconds(5); }
                 AddUiEvent(msg);
             }
             catch (Exception error)
             {
-                lock (Gate) UiMessage = "Safe-mode toggle failed: " + error.GetType().Name;
+                lock (Gate)
+                {
+                    UiMessage = "Safe-mode toggle failed: " + error.GetType().Name;
+                    UiMessageUntilUtc = DateTime.UtcNow.AddSeconds(5);
+                }
                 AddUiEvent("safe-mode toggle failed: " + error.GetType().Name);
             }
             finally { lock (Gate) { SafeToggleBusy = false; UiDirty = true; } }
@@ -561,9 +586,11 @@ public static class GhUIAgent
         int selected,
         string moduleLoadError,
         string bridgeStatus,
-        string uiMessage)
+        string uiMessage,
+        DateTime uiMessageUntil)
     {
         var lines = new List<string>();
+        bool transientLive = !string.IsNullOrEmpty(uiMessage) && DateTime.UtcNow < uiMessageUntil;
         if (page == 0)
         {
             int enabledCount = 0;
@@ -575,7 +602,7 @@ public static class GhUIAgent
             lines.Add("Safe mode: " + SafeModeText() + "  (Up toggles, next boot)");
             lines.Add("Modules: " + enabledCount + "/" + modules.Count + " enabled; changes apply next boot");
             if (!string.IsNullOrEmpty(moduleLoadError)) lines.Add("Module scan: " + moduleLoadError);
-            if (!string.IsNullOrEmpty(uiMessage)) lines.Add(uiMessage);
+            if (transientLive) lines.Add(uiMessage);
             lines.Add("");
             lines.Add("Use Left/Right to open MODULES, LOGS, or PAIRING.");
         }
@@ -590,7 +617,15 @@ public static class GhUIAgent
                 lines.Add((i == selected ? "> " : "  ") + (module.Enabled ? "ON  " : "OFF ")
                     + module.Name + " v" + module.Version + " | " + module.LastResult);
             }
-            if (!string.IsNullOrEmpty(uiMessage)) lines.Add(uiMessage);
+            // Detail line: a fresh toggle confirmation for 5s, otherwise the
+            // selected module's description (word-wrapped, dimmed by prefix).
+            if (transientLive) lines.Add(uiMessage);
+            else if (selected >= 0 && selected < modules.Count
+                && !string.IsNullOrEmpty(modules[selected].Description))
+            {
+                foreach (var wrapped in WrapText("..." + modules[selected].Description, 80))
+                    lines.Add(wrapped);
+            }
             lines.Add("");
             lines.Add("Changes are saved now and take effect after reboot.");
         }
@@ -629,6 +664,30 @@ public static class GhUIAgent
             lines.Add("This bearer token grants SDB access; keep it private.");
         }
         return lines;
+    }
+
+    // M4: word-wrap for the module description detail line (labels are
+    // single-line; long text would clip).
+    private static List<string> WrapText(string text, int width)
+    {
+        var outLines = new List<string>();
+        foreach (var paragraph in text.Split('\n'))
+        {
+            var words = paragraph.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var current = new StringBuilder();
+            foreach (var word in words)
+            {
+                if (current.Length > 0 && current.Length + 1 + word.Length > width)
+                {
+                    outLines.Add(current.ToString());
+                    current.Length = 0;
+                }
+                if (current.Length > 0) current.Append(' ');
+                current.Append(word);
+            }
+            outLines.Add(current.ToString());
+        }
+        return outLines;
     }
 
     private static int ModulePageStart(int count, int selected)
@@ -785,7 +844,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.5 boot - " + status, 0.02);
+                Note("manager v5.6 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
