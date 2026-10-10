@@ -33,14 +33,19 @@ boot
 Everything from `boot` down runs on the TV. The host is only needed to install
 the agent once.
 
-After a fresh root proof, agent v3.1 starts an authenticated SDB TCP bridge on
-`0.0.0.0:26103`. It reads a 32-character lowercase hex token from
+After a fresh root proof, the boot chain starts an authenticated SDB TCP
+bridge as a supervised headless service (`tvroot-bridge.service`, running
+`TvRootBridgeRelay.dll` under the system dotnet — no window, no app
+lifecycle, so closing the manager or switching inputs can no longer kill
+management access). It reads a 32-character lowercase hex token from
 `/opt/usr/share/selfroot/bridge.conf`, requires those exact 32 bytes at the
 start of each connection, then relays to `127.0.0.1:26101`. The default port is
 `26103`; an optional `/opt/usr/share/selfroot/bridge-port.conf` selects another
 port from `1024` through `65535`. Connection attempts
 are recorded in
 `/home/owner/share/tmp/sdk_tools/selfroot-evidence/bridge.log`.
+The manager keeps only a port probe for its status page. (Before v5.12 the
+relay lived inside the manager process and died with it.)
 
 The bridge token is sent in cleartext on the local network. Use a random token,
 keep it private, and use the bridge only on a trusted LAN.

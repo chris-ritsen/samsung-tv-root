@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-10T11:50Z";
+    private const string BuildTime = "2026-10-10T12:30Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -35,13 +35,11 @@ public static class GhUIAgent
     private const string BridgeConfig = "/opt/usr/share/selfroot/bridge.conf";
     private const string BridgePortConfig = "/opt/usr/share/selfroot/bridge-port.conf";
     private const int DefaultBridgePort = 26103;
-    private const int SdbPort = 26101;
-    private const int BridgeTokenLength = 32;
 
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.10";
+    private static string Banner = "TVROOT MANAGER v5.12";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -55,7 +53,7 @@ public static class GhUIAgent
     private static string ModuleLoadError;
     private static string SnapshotSig = "";
     private static bool SafeToggleBusy;
-    private static string BridgeStatus = "waiting for root";
+    private static string BridgeStatus = "waiting for tvroot-bridge.service";
     private static string UiMessage = "";
     private static DateTime UiMessageUntilUtc = DateTime.MinValue;
     private static DateTime LastUiRefreshUtc = DateTime.MinValue;
@@ -147,7 +145,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.10";
+        w.Title = "TVRoot Manager v5.12";
 
         BannerLabel = new TextLabel
         {
@@ -161,7 +159,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.10 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.12 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -852,7 +850,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.10 boot - " + status, 0.02);
+                Note("manager v5.12 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
@@ -931,7 +929,7 @@ public static class GhUIAgent
                         BannerColor = new Color(0.2f, 1f, 0.3f, 1f);
                         Progress = 1.0;
                     }
-                    StartBridge();
+                    ProbeBridgeStatus();
                     return;
                 }
 
@@ -1089,7 +1087,7 @@ public static class GhUIAgent
                             BannerColor = new Color(0.2f, 1f, 0.3f, 1f);
                             Progress = 1.0;
                         }
-                        StartBridge();
+                        ProbeBridgeStatus();
                         return;
                     }
                 }
@@ -1116,187 +1114,25 @@ public static class GhUIAgent
         });
     }
 
-    private static void StartBridge()
+    // v5.12: the relay is owned by tvroot-bridge.service (supervised root
+    // shell running managed IL - no window, no app lifecycle to kill it).
+    // The agent only probes the port for its status page.
+    private static void ProbeBridgeStatus()
     {
         try
         {
-            var token = File.ReadAllText(BridgeConfig).Trim();
-            if (!IsBridgeToken(token))
+            using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
-                Note("bridge unavailable: bridge.conf must contain 32 lowercase hex characters");
-                return;
+                probe.ReceiveTimeout = 2000;
+                probe.SendTimeout = 2000;
+                probe.Connect("127.0.0.1", BridgePort());
             }
-
-            var bridgePort = DefaultBridgePort;
-            if (File.Exists(BridgePortConfig)
-                && (!int.TryParse(File.ReadAllText(BridgePortConfig).Trim(), out bridgePort)
-                    || bridgePort < 1024
-                    || bridgePort > 65535))
-            {
-                Note("bridge unavailable: bridge-port.conf must contain a port from 1024 to 65535");
-                return;
-            }
-
-            var listener = new TcpListener(IPAddress.Any, bridgePort);
-            listener.Start(8);
-            lock (Gate)
-            {
-                BridgeStatus = "listening";
-                UiDirty = true;
-            }
-            AddUiEvent("sdb bridge listening on port " + bridgePort);
-            Task.Run(() => AcceptBridgeClients(listener, token));
+            lock (Gate) { BridgeStatus = "up (tvroot-bridge.service)"; UiDirty = true; }
         }
-        catch (Exception error)
+        catch
         {
-            lock (Gate)
-            {
-                BridgeStatus = "unavailable: " + error.GetType().Name;
-                UiDirty = true;
-            }
-            AddUiEvent("bridge unavailable: " + error.GetType().Name + ": " + error.Message);
+            lock (Gate) { BridgeStatus = "down - tvroot-bridge.service not listening"; UiDirty = true; }
         }
-    }
-
-    private static bool IsBridgeToken(string token)
-    {
-        if (token == null || token.Length != BridgeTokenLength) return false;
-        foreach (var character in token)
-        {
-            if (!((character >= '0' && character <= '9')
-                || (character >= 'a' && character <= 'f'))) return false;
-        }
-        return true;
-    }
-
-    private static void AcceptBridgeClients(TcpListener listener, string token)
-    {
-        while (true)
-        {
-            try
-            {
-                var client = listener.AcceptTcpClient();
-                Task.Run(() => HandleBridgeClient(client, token));
-            }
-            catch (Exception error)
-            {
-                BridgeLog("listener stopped: " + error.GetType().Name);
-                return;
-            }
-        }
-    }
-
-    private static void HandleBridgeClient(TcpClient client, string token)
-    {
-        var peer = "unknown";
-        TcpClient upstream = null;
-        try
-        {
-            peer = client.Client.RemoteEndPoint == null
-                ? peer
-                : client.Client.RemoteEndPoint.ToString();
-            client.NoDelay = true;
-            var clientStream = client.GetStream();
-            clientStream.ReadTimeout = 5000;
-            var received = new byte[BridgeTokenLength];
-            var count = 0;
-            try
-            {
-                while (count < received.Length)
-                {
-                    var read = clientStream.Read(received, count, received.Length - count);
-                    if (read <= 0) break;
-                    count += read;
-                }
-            }
-            catch (IOException)
-            {
-                BridgeLog("rejected " + peer + " (token timeout)");
-                return;
-            }
-            if (count != received.Length)
-            {
-                BridgeLog("rejected " + peer + " (missing or short token)");
-                return;
-            }
-            if (!TokensMatch(received, token))
-            {
-                BridgeLog("rejected " + peer + " (wrong token)");
-                return;
-            }
-
-            clientStream.ReadTimeout = Timeout.Infinite;
-            upstream = new TcpClient(AddressFamily.InterNetwork);
-            upstream.NoDelay = true;
-            upstream.Connect(IPAddress.Loopback, SdbPort);
-            BridgeLog("authorized " + peer);
-
-            var upstreamStream = upstream.GetStream();
-            var finished = new ManualResetEvent(false);
-            var toSdbd = Task.Run(() => CopyBridgeStream(clientStream, upstreamStream, finished));
-            var toClient = Task.Run(() => CopyBridgeStream(upstreamStream, clientStream, finished));
-            finished.WaitOne();
-            client.Close();
-            upstream.Close();
-            Task.WaitAll(new[] { toSdbd, toClient }, 1000);
-            BridgeLog("closed " + peer);
-        }
-        catch (Exception error)
-        {
-            BridgeLog("connection " + peer + " failed: " + error.GetType().Name);
-        }
-        finally
-        {
-            try { client.Close(); } catch { }
-            if (upstream != null) { try { upstream.Close(); } catch { } }
-        }
-    }
-
-    private static bool TokensMatch(byte[] supplied, string expected)
-    {
-        var expectedBytes = Encoding.ASCII.GetBytes(expected);
-        var difference = 0;
-        for (int i = 0; i < BridgeTokenLength; i++)
-        {
-            difference |= supplied[i] ^ expectedBytes[i];
-        }
-        return difference == 0;
-    }
-
-    private static void CopyBridgeStream(
-        NetworkStream source,
-        NetworkStream destination,
-        ManualResetEvent finished)
-    {
-        try
-        {
-            var buffer = new byte[65536];
-            while (true)
-            {
-                var count = source.Read(buffer, 0, buffer.Length);
-                if (count <= 0) break;
-                destination.Write(buffer, 0, count);
-            }
-        }
-        catch { }
-        finally { finished.Set(); }
-    }
-
-    private static readonly object BridgeLogLock = new object();
-
-    private static void BridgeLog(string message)
-    {
-        var line = DateTime.UtcNow.ToString("o") + " " + message + "\n";
-        lock (BridgeLogLock)
-        {
-            try
-            {
-                Directory.CreateDirectory(Evidence);
-                File.AppendAllText(Evidence + "/bridge.log", line);
-            }
-            catch { }
-        }
-        AddUiEvent("bridge " + message);
     }
 
     private static byte[] Frame(string cmd, uint arg0, uint arg1, byte[] data)
