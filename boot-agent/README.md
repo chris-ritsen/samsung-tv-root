@@ -241,8 +241,19 @@ Reopening the manager from the launcher (`TVRoot` tile — the squatted
 `com.samsung.tv.ghservice` manifest label was renamed from GHService) is
 instant: if this boot already has fresh proof the agent skips the injection
 entirely, goes green, and restarts the bridge (reopen fast-path). A full
-chain only runs at boot. Closing the manager stops its process and with it
-the bridge; reopening restores both in seconds.
+chain only runs at boot. Closing the manager no longer stops management:
+the relay runs as `tvroot-bridge.service` and survives manager close and
+input switches.
+
+**Run the boot agent headless for daily use.** A `uiapp` boot agent is a
+diagnostic mode: because it squats a preinstalled service app, the platform
+can surface its window when it expects Gaming Hub, and the UI timer/input
+logging then run over whatever is playing. `svcapp` boots identically and
+shows nothing (see “The three pieces”), so the clean split is a headless
+`svcapp` boot agent plus the manager as a separate on-demand app. Until the
+dedicated-appid migration lands, converting the squatted app to `svcapp`
+(`app_component='svcapp'`, `app_nodisplay='true'`) removes the window while
+keeping the proven boot trigger.
 
 Module toggles apply on the next boot because the root runner snapshots
 overrides before executing any module. The UI writes overrides under

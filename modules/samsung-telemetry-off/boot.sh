@@ -24,10 +24,10 @@
 # PID 1 and the launchpad pool. (pkill -f once matched the runner's own
 # sh -c cmdline and cut its own transport mid-run.)
 #
-# TVPlus-button hijack: the button's binding cannot be rewritten, so the
-# hijack loop resolves presses into our hands - tvplus stays enabled (no
-# system toast), and on any tvplus/deeplinker sighting (button presses
-# only, no autostart) it kills them and foregrounds the manager.
+# Note (1.2.3): the old TVPlus/Disney hijack loop is gone. It ran a PS scan
+# every 2 s and launched the manager on any "tvplus|deeplink|disney" match,
+# which interrupted playback and kept the CPU busy. The manager is opened
+# by the user, not by sniffing other apps.
 #
 # Manager visibility: the agent (SMACK User::Pkg::*) only reads
 # User::App::Shared files here; the readable label is re-applied below.
@@ -41,6 +41,13 @@ MODULE_DIR=${MODULE_DIR:-/opt/usr/share/selfroot/modules/samsung-telemetry-off}
 EVIDENCE=${EVIDENCE:-/home/owner/share/tmp/sdk_tools/selfroot-evidence}
 UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
 chsmack -r -a 'User::App::Shared' /opt/usr/share/selfroot/modules 2>/dev/null
+
+# 1.2.3 cleanup: remove the legacy hijack unit on upgrade. /run is tmpfs, so
+# this only matters when the module is re-run without a reboot; a reboot
+# would have cleared it anyway.
+systemctl stop tvroot-hijack.service >/dev/null 2>&1
+rm -f /run/systemd/system/tvroot-hijack.service >/dev/null 2>&1
+systemctl reset-failed tvroot-hijack.service >/dev/null 2>&1
 
 if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
     systemctl stop tvroot-watchdog.service tvroot-hijack.service >/dev/null 2>&1
@@ -91,9 +98,8 @@ sweep() {
     done
 }
 sweep
-# supervised loops (unit files below run these via cat|bash for UEP).
+# supervised loop (unit file below runs this via cat|bash for UEP).
 WD=/opt/usr/share/selfroot/modules/samsung-telemetry-off/watchdog.sh
-HJ=/opt/usr/share/selfroot/modules/samsung-telemetry-off/hijack.sh
 RD=/run/systemd/system
 cat > $RD/tvroot-watchdog.service <<EOF
 [Unit]
@@ -107,20 +113,7 @@ RestartSec=5
 StartLimitIntervalSec=60
 StartLimitBurst=3
 EOF
-cat > $RD/tvroot-hijack.service <<EOF
-[Unit]
-Description=TVRoot TVPlus-button hijack
-DefaultDependencies=false
-[Service]
-Type=simple
-ExecStart=/bin/sh -c 'cat $HJ | MODULE_DIR=$MODULE_DIR EVIDENCE=$EVIDENCE bash'
-Restart=always
-RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=3
-EOF
 systemctl daemon-reload 2>/dev/null
 systemctl restart tvroot-watchdog.service 2>/dev/null
-systemctl restart tvroot-hijack.service 2>/dev/null
-systemctl is-active tvroot-watchdog.service tvroot-hijack.service 2>&1
+systemctl is-active tvroot-watchdog.service 2>&1
 exit 0

@@ -14,7 +14,7 @@ using Tizen.NUI.BaseComponents;
 
 public static class GhUIAgent
 {
-    private const string BuildTime = "2026-10-10T12:30Z";
+    private const string BuildTime = "2026-10-20T17:00Z";
 
     private const string Res = "/opt/usr/apps/com.samsung.tv.ghservice/res/selfroot";
     private const string AppHome = "/tmp/selfroot-app";
@@ -31,6 +31,7 @@ public static class GhUIAgent
     private const string UiEnabledRoot = UiModuleRoot + "/enabled";
     private const string UiSafeMode = "/home/owner/share/tmp/sdk_tools/selfroot-ui/safe-mode";
     private const string AgentLogPath = Evidence + "/agent.log";
+    private const string KeyDebugFlag = "/opt/usr/share/selfroot/key-debug";
     private const int SessionAttempts = 18;          // 18 x 10s = 3 min for sdbd to come up
     private const string BridgeConfig = "/opt/usr/share/selfroot/bridge.conf";
     private const string BridgePortConfig = "/opt/usr/share/selfroot/bridge-port.conf";
@@ -39,7 +40,7 @@ public static class GhUIAgent
     private static readonly object Gate = new object();
     private static readonly List<string> Events = new List<string>();
     private static double Progress = 0.0;
-    private static string Banner = "TVROOT MANAGER v5.12";
+    private static string Banner = "TVROOT MANAGER v5.13";
     private static Color BannerColor = new Color(1f, 0.8f, 0.2f, 1f);
     private static TextLabel BannerLabel;
     private static TextLabel VersionLabel;
@@ -63,7 +64,8 @@ public static class GhUIAgent
     private static int ScrollOffset;          // v5: 0 = tail, >0 = scrolled up
     private static bool UiDirty = true;        // v5: force refresh on scroll
     private static bool IsAppActive = true;    // true when foreground, false when paused/background
-    private static int KeySampleCounter = 0;   // sample key logging to reduce spam
+    private static bool KeyDebug;               // opt-in remote-key recon (see KeyDebugFlag)
+    private static int LastBarWidth = -1;
 
     private sealed class ModuleEntry
     {
@@ -155,7 +157,7 @@ public static class GhUIAgent
     {
         var w = Window.Instance;
         w.BackgroundColor = new Color(0f, 0f, 0f, 1f);
-        w.Title = "TVRoot Manager v5.12";
+        w.Title = "TVRoot Manager v5.13";
 
         BannerLabel = new TextLabel
         {
@@ -169,7 +171,7 @@ public static class GhUIAgent
 
         VersionLabel = new TextLabel
         {
-            Text = "v5.12 build " + BuildTime + " rev " + SelfRev(),
+            Text = "v5.13 build " + BuildTime + " rev " + SelfRev(),
             PointSize = 15,
             TextColor = new Color(0.45f, 0.45f, 0.5f, 1f),
             Position2D = new Position2D(120, 142),
@@ -219,6 +221,11 @@ public static class GhUIAgent
 
         w.KeyEvent += OnUiKey;
 
+        // Remote-key recon is off unless the user explicitly asks for it.
+        // The old unconditional File.AppendAllText() on every key press was
+        // disk I/O in the input path (worst case: rapid YouTube navigation).
+        try { KeyDebug = File.Exists(KeyDebugFlag); } catch { KeyDebug = false; }
+
         _uiTimer = new Tizen.NUI.Timer(300);
         _uiTimer.Tick += OnTick;
         _uiTimer.Start();
@@ -228,15 +235,10 @@ public static class GhUIAgent
     {
         var name = e.Key != null ? e.Key.KeyPressedName : null;
         if (string.IsNullOrEmpty(name)) return;
-        // v5.7: log physical key names for remote recon. When backgrounded,
-        // sample every 10th key to reduce I/O contention with YouTube navigation.
-        bool shouldLog = false;
-        lock (Gate)
-        {
-            if (IsAppActive) shouldLog = true;
-            else if (++KeySampleCounter % 10 == 0) shouldLog = true;
-        }
-        if (shouldLog)
+        // v5.13: remote-key recon is opt-in (touch the flag file, reboot).
+        // Logging every press to disk sat in the input path; with the flag
+        // absent this is a single bool test.
+        if (KeyDebug)
         {
             try
             {
@@ -394,7 +396,13 @@ public static class GhUIAgent
         if (BannerLabel.Text != banner) BannerLabel.Text = banner;
         if (bannerColor != BannerLabel.TextColor) BannerLabel.TextColor = bannerColor;
         var width = (int)(1680 * progress);
-        Bar.Size2D = new Size2D(width, 22);
+        // Only touch the native bar when its width actually changes. The old
+        // unconditional assignment re-laid-out a view on every 300 ms tick.
+        if (width != LastBarWidth)
+        {
+            Bar.Size2D = new Size2D(width, 22);
+            LastBarWidth = width;
+        }
         if (CloseRequested)
         {
             RequestExit();
@@ -874,7 +882,7 @@ public static class GhUIAgent
                         .Append(File.ReadAllText("/proc/self/attr/current").Trim()).Append(' ');
                 }
                 catch { }
-                Note("manager v5.12 boot - " + status, 0.02);
+                Note("manager v5.13 boot - " + status, 0.02);
 
                 foreach (var name in new[]
                 {
