@@ -62,6 +62,8 @@ public static class GhUIAgent
     private static int DisplayLineCount;
     private static int ScrollOffset;          // v5: 0 = tail, >0 = scrolled up
     private static bool UiDirty = true;        // v5: force refresh on scroll
+    private static bool IsAppActive = true;    // true when foreground, false when paused/background
+    private static int KeySampleCounter = 0;   // sample key logging to reduce spam
 
     private sealed class ModuleEntry
     {
@@ -120,7 +122,15 @@ public static class GhUIAgent
         protected override void OnResume()
         {
             base.OnResume();
-            lock (Gate) UiDirty = true;
+            lock (Gate) { UiDirty = true; IsAppActive = true; }
+            _uiTimer.Start();
+        }
+
+        protected override void OnPause()
+        {
+            base.OnPause();
+            lock (Gate) IsAppActive = false;
+            _uiTimer.Stop();
         }
     }
 
@@ -218,14 +228,23 @@ public static class GhUIAgent
     {
         var name = e.Key != null ? e.Key.KeyPressedName : null;
         if (string.IsNullOrEmpty(name)) return;
-        // v5.7: log every physical key name (remote recon: which names do
-        // dedicated buttons like TVPlus deliver, and do they reach apps?).
-        try
+        // v5.7: log physical key names for remote recon. When backgrounded,
+        // sample every 10th key to reduce I/O contention with YouTube navigation.
+        bool shouldLog = false;
+        lock (Gate)
         {
-            Directory.CreateDirectory(Evidence);
-            File.AppendAllText(AgentLogPath, "[" + DateTime.UtcNow.ToString("o") + "] [key] " + name + "\n");
+            if (IsAppActive) shouldLog = true;
+            else if (++KeySampleCounter % 10 == 0) shouldLog = true;
         }
-        catch { }
+        if (shouldLog)
+        {
+            try
+            {
+                Directory.CreateDirectory(Evidence);
+                File.AppendAllText(AgentLogPath, "[" + DateTime.UtcNow.ToString("o") + "] [key] " + name + "\n");
+            }
+            catch { }
+        }
         // M4: one remote press delivers down+up; acting on both jumped two
         // pages (or toggled twice) per press. Ignore the release phase.
         // Deliberately only filters "up" so an unknown vocabulary can't
@@ -394,6 +413,11 @@ public static class GhUIAgent
 
     private static void RefreshModuleSnapshot()
     {
+        // Skip polling entirely when backgrounded to reduce I/O during YouTube playback
+        bool isActive = false;
+        lock (Gate) isActive = IsAppActive;
+        if (!isActive) return;
+
         if ((DateTime.UtcNow - LastUiRefreshUtc).TotalSeconds < 1.0) return;
         LastUiRefreshUtc = DateTime.UtcNow;
         List<ModuleEntry> modules;
