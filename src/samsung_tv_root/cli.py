@@ -57,6 +57,7 @@ from .service import (
 
 
 QN90B_PAYLOAD_DIRECTORY = payload_directory("qn90b")
+QN90B31_PAYLOAD_DIRECTORY = payload_directory("qn90b31")
 QN90F_REMOTE_DIRECTORY = PurePosixPath(
     "/home/owner/share/tmp/sdk_tools/samsung-tv-root/qn90f"
 )
@@ -453,6 +454,13 @@ def qn90b_exploit(
         arguments.host,
         arguments.payload_directory,
         sdb_timeout=arguments.sdb_timeout,
+        # Offer the .NET Core 3.1 payload set only with the stock payload
+        # directory; an explicit --payload-directory stays single-runtime.
+        legacy_payload_directory=(
+            QN90B31_PAYLOAD_DIRECTORY
+            if arguments.payload_directory == QN90B_PAYLOAD_DIRECTORY
+            else None
+        ),
     )
     print_assessment(exploit.preflight(require_tested=require_tested))
     exploit.stage()
