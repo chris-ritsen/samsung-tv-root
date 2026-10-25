@@ -19,6 +19,12 @@ DEFAULT_TIMEOUT = 10.0
 DEFAULT_CAPTURE_TIMEOUT = 30.0
 SDB_APPINSTALL_PREFIX = "0 appinstall tpk "
 SDB_APPINSTALL_MAX_SAFE_BYTES = 510
+# Captures switch to a staged script below the hard appinstall limit. A
+# European QN90B on T-PTMDEUC-REL-202602250226 silently discarded direct
+# injections of 487 bytes and above while 475-byte injections and staged
+# scripts still ran; other firmware may have similar undocumented ceilings.
+# Keep direct captures comfortably below that observed drop zone.
+SDB_CAPTURE_DIRECT_MAX_SAFE_BYTES = 448
 SHELL_INJECTION_DELAY_SECONDS = 2.0
 SHELL_INJECTION_MINIMUM_DELTA = 1.5
 REMOTE_SCRIPT_DIRECTORY = PurePosixPath("/home/owner/share/tmp/sdk_tools")
@@ -276,7 +282,7 @@ class SdbClient:
                 "printf '\\n[exit:%s]\\n' \"$?\" >&3;exec 3>&-"
             )
             launch_command = wrapped
-            if _injection_argument_size(wrapped) > SDB_APPINSTALL_MAX_SAFE_BYTES:
+            if _injection_argument_size(wrapped) > SDB_CAPTURE_DIRECT_MAX_SAFE_BYTES:
                 launch_command = self._stage_script(wrapped)
             if on_listening is not None:
                 on_listening(callback, bind, callback_port)
