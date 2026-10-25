@@ -126,6 +126,7 @@ class ExploitCompatibilityProfile:
     capability_probes: tuple[str, ...]
     compatible_builds: frozenset[str] = frozenset()
     additional_tested_builds: frozenset[str] = frozenset()
+    additional_tizen_prefixes: tuple[str, ...] = ()
 
     @property
     def tested_builds(self) -> frozenset[str]:
@@ -174,13 +175,14 @@ class ExploitCompatibilityProfile:
                 f"architecture is {fingerprint.architecture or 'unknown'}, "
                 f"expected {self.architecture}"
             )
-        if (
-            fingerprint.tizen_release is None
-            or not fingerprint.tizen_release.startswith(self.tizen_prefix)
+        tizen_prefixes = (self.tizen_prefix, *self.additional_tizen_prefixes)
+        if fingerprint.tizen_release is None or not any(
+            fingerprint.tizen_release.startswith(prefix)
+            for prefix in tizen_prefixes
         ):
             failures.append(
                 f"Tizen release is {fingerprint.tizen_release or 'unknown'}, "
-                f"expected {self.tizen_prefix}"
+                f"expected {' or '.join(tizen_prefixes)}"
             )
         missing_capabilities = sorted(
             self.required_capabilities - fingerprint.capabilities
@@ -232,6 +234,16 @@ def _capability_probe(name: str, condition: str) -> str:
     )
 
 
+# T-PTMDEUC-REL-202602250226 was reviewed on a QE55S95BATXXH (S95B), a 2022
+# PontusM sibling of the tested QN90B (its /etc/prd_info.ini records
+# TIZEN-TRUNK2022-PontusM-RELEASE_20260225.1). The live fingerprint matches the
+# tested platform (SDK foothold, Linux 5.4.77, ARMv7, dotnet, FDET, PontusM
+# layout) and the FDET route produced an authenticated UID-0 root agent with
+# the .NET Core 3.1 payload build. Its /etc/tizen-release is spelled
+# "Tizen6/TV 6.5.0 (arm)" (TZ_BUILD_RELEASE_NAME="Tizen6/TV"). Only that exact
+# reviewed build is accepted outside the tested family; other builds of the
+# line fail closed until reviewed. The fixed-address UEP gate stays limited to
+# tested builds.
 QN90B_PROFILE = ExploitCompatibilityProfile(
     name="qn90b",
     tested_build="T-PTMAKUC-REL-202310071804",
@@ -240,6 +252,7 @@ QN90B_PROFILE = ExploitCompatibilityProfile(
     kernel_family="5.4.",
     architecture="armv7l",
     tizen_prefix="Tizen6.5/TV 6.5.",
+    additional_tizen_prefixes=("Tizen6/TV 6.5.",),
     required_capabilities=frozenset(("dotnet", "fdet-device", "pontusm-layout")),
     capability_probes=(
         _capability_probe(
@@ -253,6 +266,7 @@ QN90B_PROFILE = ExploitCompatibilityProfile(
             "&& grep -q 'model=4kbtin' /proc/cmdline",
         ),
     ),
+    compatible_builds=frozenset(("T-PTMDEUC-REL-202602250226",)),
 )
 
 

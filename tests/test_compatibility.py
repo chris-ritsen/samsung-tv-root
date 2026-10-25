@@ -12,13 +12,14 @@ def qn90b_output(
     *,
     build: str = "T-PTMAKUC-REL-202310071804",
     kernel: str = "5.4.77",
+    tizen: str = "Tizen6.5/TV 6.5.0 (arm)",
     capabilities: tuple[str, ...] = ("DOTNET", "FDET_DEVICE", "PONTUSM_LAYOUT"),
 ) -> str:
     return target_output(
         build=build,
         kernel=kernel,
         architecture="armv7l",
-        tizen="Tizen6.5/TV 6.5.0 (arm)",
+        tizen=tizen,
         capabilities=capabilities,
     )
 
@@ -105,6 +106,74 @@ def test_qn90b_uep_remains_limited_to_tested_addresses() -> None:
     )
     with pytest.raises(TargetCompatibilityError, match="build-specific addresses"):
         assessment.require_tested("QN90B UEP control")
+
+
+def test_reviewed_s95b_build_is_compatible_untested() -> None:
+    # Reviewed on a QE55S95BATXXH (S95B), a 2022 PontusM sibling of the tested
+    # QN90B: identical live platform fingerprint, regional /etc/tizen-release
+    # spelling, FDET root with the .NET Core 3.1 payload build.
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(
+            build="T-PTMDEUC-REL-202602250226",
+            tizen="Tizen6/TV 6.5.0 (arm)",
+        )
+    ).require_compatible()
+
+    assert assessment.status is CompatibilityStatus.COMPATIBLE
+    assert assessment.differences == (
+        "build T-PTMDEUC-REL-202602250226 differs from "
+        "T-PTMAKUC-REL-202310071804",
+    )
+
+
+def test_unreviewed_s95b_build_fails_closed() -> None:
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(
+            build="T-PTMDEUC-REL-202701010101",
+            tizen="Tizen6/TV 6.5.0 (arm)",
+        )
+    )
+
+    with pytest.raises(TargetCompatibilityError, match="not a reviewed"):
+        assessment.require_compatible()
+
+
+def test_reviewed_s95b_build_uep_stays_limited_to_tested_addresses() -> None:
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(
+            build="T-PTMDEUC-REL-202602250226",
+            tizen="Tizen6/TV 6.5.0 (arm)",
+        )
+    )
+    with pytest.raises(TargetCompatibilityError, match="build-specific addresses"):
+        assessment.require_tested("QN90B UEP control")
+
+
+def test_qn90b_release_spelling_alone_keeps_tested_build_tested() -> None:
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(tizen="Tizen6/TV 6.5.0 (arm)")
+    ).require_compatible()
+
+    assert assessment.status is CompatibilityStatus.TESTED
+    assert assessment.differences == ()
+
+
+def test_newer_ptm_generation_stays_outside_qn90b_route() -> None:
+    for build in ("T-PTMCDEUC-2000.2", "T-PTMDAKUC-0090-2130.0"):
+        assessment = QN90B_PROFILE.assess(qn90b_output(build=build))
+        with pytest.raises(TargetCompatibilityError, match="not a reviewed"):
+            assessment.require_compatible()
+
+
+def test_qn90b_tizen_release_mismatch_fails_before_exploit() -> None:
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(tizen="Tizen7/TV 7.0.0 (arm)")
+    )
+    with pytest.raises(
+        TargetCompatibilityError,
+        match="expected Tizen6.5/TV 6.5. or Tizen6/TV 6.5.",
+    ):
+        assessment.require_compatible()
 
 
 def test_exact_qn90f_build_is_tested() -> None:
