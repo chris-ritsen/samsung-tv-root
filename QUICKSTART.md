@@ -48,6 +48,9 @@ On Windows, use `py -3.12` and `.venv\Scripts\python.exe`. When running from a
 source checkout, preflight needs only Python and `sdb`; root commands also
 require GNU Make, the .NET 6 SDK, and built TV payloads. Run
 `make common-payload qn90b-payload qn90f-payload` for the model-specific routes.
+For a QN90B-family TV with a .NET Core 3.1 runtime, also run
+`make qn90b31-payload`; preflight stages that variant automatically when it
+detects a 3.1 CLR.
 The archive route needs OpenSSL on the host's `PATH`; for a TV with .NET 3.1,
 also run `make common31-payload` with SDK 6.0.428 installed. That build restores
 the .NET 3.1 reference packages from NuGet. See the
