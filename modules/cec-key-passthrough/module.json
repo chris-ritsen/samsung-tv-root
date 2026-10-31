@@ -1,0 +1,9 @@
+{
+  "id": "cec-key-passthrough",
+  "name": "Fix HDMI-CEC remote lag (Fire TV / streaming sticks)",
+  "version": "1.0.0",
+  "description": "Sets the vendor CEC key-consume switch to false so remote presses are forwarded to the active HDMI device instead of being consumed by the TV applet layer. Fixes multi-second lag when using the Samsung remote on a Fire TV / streaming stick.",
+  "author": "levkropp",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}
