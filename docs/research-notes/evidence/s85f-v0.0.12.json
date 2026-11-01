@@ -1,0 +1,104 @@
+{
+  "description": "Selected fields from five captured v0.0.12 archive-root sessions; private host addresses and unrelated diagnostics omitted.",
+  "model": "QA77S85FAEXXY",
+  "firmware": "T-PTMFUABC-0090-1301.0",
+  "same_tv_boot": true,
+  "sessions": [
+    {
+      "session": 1,
+      "invocation": "release-cli",
+      "authenticated": true,
+      "uid": 0,
+      "euid": 0,
+      "gid": 0,
+      "egid": 0,
+      "cap_eff": "0000003fffffffff",
+      "smack": "User",
+      "runtime": "6.0",
+      "runtime_source": "detected",
+      "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+      "staging_cleaned": true,
+      "system_files_unchanged": true,
+      "commands": [
+        {
+          "command": "id",
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "uid=0(owner) gid=0(root) groups=0(root),29(audio),44(video),201(display),1901(log),6509(app_logging),6525(usb_device),10001(priv_externalstorage),10002(priv_externalstorage_appdata),10013(priv_tee_client),10014(priv_peripheralio),10212(priv_platform),10501(priv_camera),10502(priv_mediastorage),10503(priv_recorder),10704(priv_internet),10705(priv_network_get),10711(priv_tethering_admin),10901(priv_email),10903(priv_message_read),11103(priv_mapservice),11201(priv_appdebugging) context=\"User\"\n",
+          "timed_out": false
+        },
+        {
+          "command": "uname -a",
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "Linux Samsung 5.4.261 #1 SMP PREEMPT Wed Jul 1 16:47:42 UTC 2026 armv7l GNU/Linux\n",
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "session": 2,
+      "invocation": "release-cli",
+      "authenticated": true,
+      "uid": 0,
+      "euid": 0,
+      "gid": 0,
+      "egid": 0,
+      "cap_eff": "0000003fffffffff",
+      "smack": "User",
+      "runtime": "6.0",
+      "runtime_source": "detected",
+      "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+      "staging_cleaned": true,
+      "system_files_unchanged": true
+    },
+    {
+      "session": 3,
+      "invocation": "release-cli",
+      "authenticated": true,
+      "uid": 0,
+      "euid": 0,
+      "gid": 0,
+      "egid": 0,
+      "cap_eff": "0000003fffffffff",
+      "smack": "User",
+      "runtime": "6.0",
+      "runtime_source": "detected",
+      "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+      "staging_cleaned": true,
+      "system_files_unchanged": true
+    },
+    {
+      "session": 4,
+      "invocation": "release-cli",
+      "authenticated": true,
+      "uid": 0,
+      "euid": 0,
+      "gid": 0,
+      "egid": 0,
+      "cap_eff": "0000003fffffffff",
+      "smack": "User",
+      "runtime": "6.0",
+      "runtime_source": "detected",
+      "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+      "staging_cleaned": true,
+      "system_files_unchanged": true
+    },
+    {
+      "session": 5,
+      "invocation": "host-wrapper-invoking-release-cli",
+      "authenticated": true,
+      "uid": 0,
+      "euid": 0,
+      "gid": 0,
+      "egid": 0,
+      "cap_eff": "0000003fffffffff",
+      "smack": "User",
+      "runtime": "6.0",
+      "runtime_source": "detected",
+      "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+      "staging_cleaned": true,
+      "system_files_unchanged": true
+    }
+  ]
+}

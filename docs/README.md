@@ -24,4 +24,5 @@ firmware.
 - [Exploit chain](research-notes/EXPLOIT_CHAIN.md)
 - [QN90B reproduction](research-notes/QN90B_REPRODUCTION.md)
 - [QN90F reproduction](research-notes/QN90F_REPRODUCTION.md)
+- [S85F public-release validation](research-notes/S85F_VALIDATION.md)
 - [SWU AES extraction](research-notes/AES_EXTRACTION.md)
