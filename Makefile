@@ -37,6 +37,7 @@ common-payload:
 
 common31-payload: common-payload
 	rm -rf "$(COMMON31_OUT)"
+	mkdir -p "$(COMMON31_OUT)"
 	cd payloads/common31 && DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET31) build SamsungTvArchiveRoot.csproj \
 		-p:BaseIntermediateOutputPath=$(abspath payloads/common31/obj/archive)/ \
 		--configuration Release --output out

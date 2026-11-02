@@ -114,7 +114,37 @@ labels reflect its own platform checks, not all community reports in this table.
 
 Root and UEP changes remain volatile. The controller makes root appear
 semi-persistent by reacquiring it from another computer after a TV reboot. It
-does not install a TV-side boot service.
+does not install a TV-side boot service. The optional source-only boot agent
+below provides a separate, manually installed TV-side path.
+
+## Optional TV-side boot-root
+
+**BLUF:** The [boot agent](boot-agent/README.md) lets a supported TV start its
+own archive-launcher root chain at boot, without a desktop initiating it. A
+token-authenticated headless SDB bridge keeps host access available while
+Developer Mode Host PC IP stays at `127.0.0.1`. Installation is manual, opt-in,
+and repurposes the stock Gaming Hub service; updating the host CLI installs
+nothing on the TV.
+
+The contribution builds on [levkropp's untethered-root fork](https://github.com/levkropp/samsung-tv-root-untethered)
+with additional integration and exact-device validation from
+[kninetimmy's fork](https://github.com/kninetimmy/samsung-tv-root-untethered).
+It adds .NET Core 3.1/.NET 6 boot builds, bridge-aware archive-root commands,
+shared staging/evidence requirements, Windows LF deployment checks and a
+fresh-boot identity-proof verifier.
+
+| Reported model/build | Result | Remaining boundary |
+| --- | --- | --- |
+| `QN55QN90BAFXZA`, `T-PTMAKUC-REL-202602250225`, Tizen 6.5/.NET 3.1.3 | One automatic-root reboot; complete zero UID/GID and matching new boot ID retrieved twice as SDK before post-boot host root | Installed CRLF bridge script still blocks headless access; source prevention passes, live repair pending |
+| `UN50U8000FFXZA`, `T-X22UDFAKUC-0090-REL-202607141244`, Tizen 9/.NET 6.0.9 | One automatic-root reboot; fresh proof retrieved as SDK before host root; headless access survived manager close | Repeated power cycles, standby/wake, HDMI gaming and actual rollback remain untested |
+
+These are exact-build reports using `archive-root`; they do not establish new
+FDET/Mali targets or unrestricted SMACK access. The earlier Q60B result remains
+an inherited report. See the [QN90B report](docs/research-notes/QN90B_BOOT_ROOT.md)
+and [U8000 report](docs/research-notes/U8000_REPRODUCTION.md) for evidence,
+deployment failures and recovery limits. Private framework assemblies, signing
+keys, tokens and backups are not included. The optional boot manager is built
+from source against the TV's own framework; it is not a bundled release installer.
 
 ## Capability status
 

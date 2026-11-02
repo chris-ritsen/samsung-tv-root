@@ -23,5 +23,11 @@ firmware.
 
 - [Exploit chain](research-notes/EXPLOIT_CHAIN.md)
 - [QN90B reproduction](research-notes/QN90B_REPRODUCTION.md)
+- [QN90B automatic boot-root report](research-notes/QN90B_BOOT_ROOT.md)
 - [QN90F reproduction](research-notes/QN90F_REPRODUCTION.md)
+- [U8000 root observations](research-notes/U8000_REPRODUCTION.md)
 - [SWU AES extraction](research-notes/AES_EXTRACTION.md)
+
+The [optional boot agent](../boot-agent/README.md) has separate source-build,
+manual-deployment and recovery instructions. It is not installed by the host
+controller or included as a ready-to-install manager binary in releases.

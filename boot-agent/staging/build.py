@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Build the boot agent's staging artifacts.
+
+Generates the RSA keypair for the signed launch script archive (pinned to
+./out/pinned-private.pem so re-runs do not invalidate previously staged
+signatures), the passwd bind view, and the signed launch.sh tarball that
+sdbd-tarlauncher executes at boot.
+
+All artifacts land in the selected output directory (./out/ by default).
+"""
+import argparse
+import io
+import os
+import subprocess
+import tarfile
+import tempfile
+
+PKG = "archive-root-00b0000000000001"  # 16 hex chars after the prefix
+assert len(PKG) == len("archive-root-") + 16
+assert all(c in "0123456789abcdef" for c in PKG[len("archive-root-"):])
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--output",
+    default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"),
+    help="directory for the pinned signing key and generated artifacts",
+)
+OUT = os.path.abspath(parser.parse_args().output)
+os.makedirs(OUT, exist_ok=True)
+
+LAUNCH_SH = """exec 2>&1
+{
+  echo "SELFROOT-PROOF uid=$(id -u) gid=$(id -g)"
+  echo "BOOT_ID=$(cat /proc/sys/kernel/random/boot_id)"
+  echo "---STATUS---"
+  cat /proc/self/status
+  echo "---PASSWD-VIEW---"
+  cat /etc/passwd
+  echo "---DONE---"
+} > /tmp/selfroot-proof.txt
+chsmack -a _ /tmp/selfroot-proof.txt 2>/dev/null
+
+# v5: publish the proof to the persistent evidence dir IMMEDIATELY (root
+# context), so the agent can go green + start the bridge while modules
+# (which can take minutes) are still running.
+EV=/home/owner/share/tmp/sdk_tools/selfroot-evidence
+mkdir -p "$EV" 2>/dev/null
+# M4: pre-create the agent log with the app-writable SMACK label. The agent
+# (User::Pkg::*) can append to User::App::Shared files here but can neither
+# create files nor write floor-labeled (_) ones - verified live 2026-10-09
+# (agent.log stayed 0 bytes until root touched + relabeled it).
+touch "$EV/agent.log" 2>/dev/null
+chmod 666 "$EV/agent.log" 2>/dev/null
+chsmack -a 'User::App::Shared' "$EV/agent.log" 2>/dev/null
+cp /tmp/selfroot-proof.txt "$EV/selfroot-proof.txt" 2>/dev/null
+chmod 666 "$EV/selfroot-proof.txt" 2>/dev/null
+chsmack -a 'User::App::Shared' "$EV" 2>/dev/null
+chsmack -a _ "$EV/selfroot-proof.txt" 2>/dev/null
+
+# module runner: persistent /opt modules, executed as root at every boot.
+MODS=/opt/usr/share/selfroot/modules
+UI_MODS=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
+UI_STATE=/tmp/selfroot-module-state
+mkdir -p "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
+chmod 0777 "$UI_MODS" "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
+chsmack -a 'User::App::Shared' "$UI_MODS" "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
+rm -rf "$UI_STATE"
+mkdir -p "$UI_STATE/enabled" "$UI_STATE/disabled"
+for state in enabled disabled; do
+  for marker in "$UI_MODS/$state/"*; do
+    # -s (non-empty) only: root pre-creates all markers empty (== absent)
+    # because the app cannot create files; the toggle overwrites/truncates.
+    [ -s "$marker" ] || continue
+    touch "$UI_STATE/$state/$(basename "$marker")"
+  done
+done
+if [ -d "$MODS" ]; then
+  mkdir -p "$EV" 2>/dev/null
+  for m in "$MODS"/*/; do
+    [ -d "$m" ] || continue
+    mid=$(basename "$m")
+    if [ -f "$UI_STATE/disabled/$mid" ] || { [ -f "$m/disabled" ] && [ ! -f "$UI_STATE/enabled/$mid" ]; }; then
+      echo "$(date) skip $mid (disabled)" >> "$EV/modules.log"
+      continue
+    fi
+    [ -f "$m/boot.sh" ] || continue
+    echo "$(date) run $mid" >> "$EV/modules.log"
+    ( cd "$m" && cat "$m/boot.sh" | MODULE_DIR="$m" EVIDENCE="$EV" bash ) > "$EV/module-$mid.log" 2>&1
+    echo "$(date) $mid exit=$?" >> "$EV/modules.log"
+  done
+fi
+sleep 5
+"""
+
+def openssl(*args):
+    subprocess.run(["openssl", *args], check=True, capture_output=True)
+
+with tempfile.TemporaryDirectory() as td:
+    priv = os.path.join(td, "private.pem")
+    pub = os.path.join(td, "public.pem")
+    pinned = os.path.join(OUT, "pinned-private.pem")
+    if os.path.exists(pinned):
+        import shutil; shutil.copy(pinned, priv)
+        print("signing key: PINNED", os.path.realpath(pinned))
+    else:
+        print("signing key: *** GENERATING A NEW KEYPAIR ***")
+        print("    A public.pem already staged on a TV will NOT verify a fresh")
+        print("    key (tarlauncher exit 255, no root, no proof). Copy the")
+        print("    canonical pinned-private.pem into out/ and rebuild.")
+        openssl("genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
+                "-out", priv)
+        import shutil; shutil.copy(priv, pinned)
+    os.chmod(pinned, 0o600)
+    openssl("pkey", "-in", priv, "-pubout", "-out", pub)
+    import hashlib
+    print("public.pem sha256:", hashlib.sha256(
+        open(pub, "rb").read()).hexdigest()[:16],
+        "(must match the public.pem staged on the TV)")
+    # passwd view: owner maps to uid 0
+    with open(os.path.join(td, "passwd"), "w") as f:
+        f.write("owner:x:0:0:owner:/home/owner:/bin/sh\n")
+    # archive with launch.sh member (mode 0600, mtime 0 — mirrors driver)
+    archive = os.path.join(td, f"{PKG}.tar.gz")
+    script = LAUNCH_SH.encode("ascii")
+    with tarfile.open(archive, "w:gz") as out:
+        m = tarfile.TarInfo("launch.sh")
+        m.size = len(script)
+        m.mode = 0o600
+        m.mtime = 0
+        out.addfile(m, io.BytesIO(script))
+    sig = os.path.join(td, f"{PKG}.tar.gz.signature")
+    openssl("dgst", "-sha256", "-sign", priv, "-out", sig, archive)
+    # verify round-trip
+    subprocess.run(["openssl", "dgst", "-sha256", "-verify", pub,
+                    "-signature", sig, archive], check=True, capture_output=True)
+    # ship
+    for name, src in [("private.pem", priv), ("public.pem", pub),
+                      ("passwd", os.path.join(td, "passwd")),
+                      (f"{PKG}.tar.gz", archive),
+                      (f"{PKG}.tar.gz.signature", sig)]:
+        dst = os.path.join(OUT, name)
+        with open(src, "rb") as f, open(dst, "wb") as g:
+            g.write(f.read())
+        if name == "private.pem":
+            os.chmod(dst, 0o600)
+        print("wrote", dst)
+print("PKG =", PKG)

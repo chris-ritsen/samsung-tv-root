@@ -57,6 +57,12 @@ jobs:
       - name: Install ARM linker
         run: sudo apt-get update && sudo apt-get install --yes clang lld
       - run: make payloads swu-preloads
+      - name: Build headless relay for .NET Core 3.1
+        run: dotnet build boot-agent/bridge-relay/bridge-relay.csproj --configuration Release
+      - name: Build headless relay for .NET 6
+        run: dotnet build boot-agent/bridge-relay/bridge-relay.csproj --configuration Release -p:TvTargetFramework=net6.0
+      - name: Verify relay authentication and traffic without a TV
+        run: python tools/verify_bridge_relay.py boot-agent/bridge-relay/bin/Release/net6.0/TvRootBridgeRelay.dll
       - name: Verify payload types
         run: |
           for assembly in \

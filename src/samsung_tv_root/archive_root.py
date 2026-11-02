@@ -18,7 +18,14 @@ from pathlib import Path, PurePosixPath
 
 from .resources import payload_directory
 from .root_agent import RootAgentServer, generate_secret, write_secret
-from .sdb import CaptureResult, SdbClient, SdbError, find_sdb, route_callback_host
+from .sdb import (
+    SDB_BRIDGE_PORT,
+    CaptureResult,
+    SdbClient,
+    SdbError,
+    find_sdb,
+    route_callback_host,
+)
 
 
 STAGING_ROOT = PurePosixPath("/home/owner/share/tmp/sdk_tools")
@@ -284,13 +291,21 @@ async def probe(
     command_timeout: float = 45.0,
     commands: tuple[str, ...] = (),
     payloads: Path | None = None,
+    bridge_token: str | None = None,
+    bridge_port: int = SDB_BRIDGE_PORT,
 ) -> dict[str, object]:
     ipaddress.IPv4Address(tv_host)
     callback = callback_host or route_callback_host(tv_host)
     ipaddress.IPv4Address(callback)
     bind = bind_host or callback
     ipaddress.IPv4Address(bind)
-    client = SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
+    client = SdbClient(
+        find_sdb(),
+        tv_host,
+        timeout=sdb_timeout,
+        bridge_token=bridge_token,
+        bridge_port=bridge_port,
+    )
     assessment = await asyncio.to_thread(_check_target, client, runtime)
     payloads = payloads or payload_directory(
         "common31" if assessment.runtime == "3.1" else "common"
@@ -406,14 +421,20 @@ async def probe(
                 cleaned = await asyncio.to_thread(_cleanup, client, package)
             except (ArchiveRootError, SdbError):
                 pass
-        final_hashes = await asyncio.to_thread(_capture, client, SYSTEM_HASH_COMMAND)
-        if "evidence" in locals():
-            evidence["system_files_unchanged"] = (
-                final_hashes == assessment.original_hashes
-            )
-            evidence["staging_cleaned"] = cleaned
-            if not evidence["system_files_unchanged"] or not cleaned:
-                raise ArchiveRootError(
-                    "root callback succeeded, but system-file or cleanup checks failed; "
-                    f"staging={STAGING_ROOT / package}"
+        try:
+            final_hashes = await asyncio.to_thread(_capture, client, SYSTEM_HASH_COMMAND)
+            if "evidence" in locals():
+                evidence["system_files_unchanged"] = (
+                    final_hashes == assessment.original_hashes
                 )
+                evidence["staging_cleaned"] = cleaned
+                if not evidence["system_files_unchanged"] or not cleaned:
+                    raise ArchiveRootError(
+                        "root callback succeeded, but system-file or cleanup checks failed; "
+                        f"staging={STAGING_ROOT / package}"
+                    )
+        finally:
+            try:
+                await asyncio.to_thread(client.disconnect)
+            except SdbError:
+                pass

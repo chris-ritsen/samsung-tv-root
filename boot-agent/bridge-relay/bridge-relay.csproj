@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TvTargetFramework Condition="'$(TvTargetFramework)' == ''">netcoreapp3.1</TvTargetFramework>
+    <TargetFramework>$(TvTargetFramework)</TargetFramework>
+    <UseAppHost>false</UseAppHost>
+    <Nullable>disable</Nullable>
+    <AssemblyName>TvRootBridgeRelay</AssemblyName>
+    <RootNamespace>TvRootBridgeRelay</RootNamespace>
+  </PropertyGroup>
+
+</Project>

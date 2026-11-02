@@ -1,0 +1,2 @@
+# TV shell scripts need LF even when the host uses core.autocrlf=true.
+*.sh text eol=lf

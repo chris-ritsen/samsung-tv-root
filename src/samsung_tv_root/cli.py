@@ -508,6 +508,8 @@ def command_archive_root_probe(arguments: argparse.Namespace) -> int:
             sdb_timeout=arguments.sdb_timeout,
             accept_timeout=arguments.accept_timeout,
             payloads=arguments.payload_directory,
+            bridge_token=arguments.bridge_token,
+            bridge_port=arguments.bridge_port,
         )
     )
     emit(evidence, arguments.output)
@@ -528,6 +530,8 @@ def command_archive_root_root(arguments: argparse.Namespace) -> int:
             command_timeout=arguments.command_timeout,
             commands=tuple(arguments.command),
             payloads=arguments.payload_directory,
+            bridge_token=arguments.bridge_token,
+            bridge_port=arguments.bridge_port,
         )
     )
     emit(evidence, arguments.output)
@@ -1068,6 +1072,12 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--callback-host")
         command.add_argument("--bind-host")
         command.add_argument("--sdb-timeout", type=float, default=15.0)
+        command.add_argument(
+            "--bridge-token",
+            default=os.environ.get("TVROOT_BRIDGE_TOKEN"),
+            help="32 lowercase hex characters; defaults to TVROOT_BRIDGE_TOKEN",
+        )
+        command.add_argument("--bridge-port", type=int, default=26103)
         command.add_argument("--accept-timeout", type=float, default=30.0)
         command.add_argument("--payload-directory", type=Path)
 

@@ -12,13 +12,14 @@ def qn90b_output(
     *,
     build: str = "T-PTMAKUC-REL-202310071804",
     kernel: str = "5.4.77",
+    tizen: str = "Tizen6.5/TV 6.5.0 (arm)",
     capabilities: tuple[str, ...] = ("DOTNET", "FDET_DEVICE", "PONTUSM_LAYOUT"),
 ) -> str:
     return target_output(
         build=build,
         kernel=kernel,
         architecture="armv7l",
-        tizen="Tizen6.5/TV 6.5.0 (arm)",
+        tizen=tizen,
         capabilities=capabilities,
     )
 
@@ -71,6 +72,39 @@ def test_exact_qn90b_build_is_tested() -> None:
     assert assessment.differences == ()
 
 
+@pytest.mark.parametrize(
+    ("build", "expected_status"),
+    (
+        ("T-PTMAKUC-REL-202310071804", CompatibilityStatus.TESTED),
+        ("T-PTMAKUC-REL-202602250225", CompatibilityStatus.COMPATIBLE),
+    ),
+)
+def test_qn90b_accepts_tizen6_release_label(
+    build: str, expected_status: CompatibilityStatus
+) -> None:
+    tizen = "Tizen6/TV 6.5.0 (arm)"
+    assessment = QN90B_PROFILE.assess(
+        qn90b_output(build=build, tizen=tizen)
+    ).require_compatible()
+    assert assessment.status is expected_status
+    assert assessment.fingerprint.tizen_release == tizen
+
+
+@pytest.mark.parametrize(
+    "tizen",
+    (
+        "Tizen6/TV 6.0.0 (arm)",
+        "Tizen6/TV 6.50.0 (arm)",
+        "Tizen7/TV 6.5.0 (arm)",
+        "",
+    ),
+)
+def test_qn90b_rejects_unexpected_tizen_release(tizen: str) -> None:
+    assessment = QN90B_PROFILE.assess(qn90b_output(tizen=tizen))
+    with pytest.raises(TargetCompatibilityError, match="Tizen release"):
+        assessment.require_compatible()
+
+
 def test_same_qn90b_platform_with_new_build_is_attempted() -> None:
     assessment = QN90B_PROFILE.assess(
         qn90b_output(
@@ -99,9 +133,12 @@ def test_qn90b_missing_memory_layout_fails_before_exploit() -> None:
         assessment.require_compatible()
 
 
-def test_qn90b_uep_remains_limited_to_tested_addresses() -> None:
+@pytest.mark.parametrize(
+    "tizen", ("Tizen6.5/TV 6.5.0 (arm)", "Tizen6/TV 6.5.0 (arm)")
+)
+def test_qn90b_uep_remains_limited_to_tested_addresses(tizen: str) -> None:
     assessment = QN90B_PROFILE.assess(
-        qn90b_output(build="T-PTMAKUC-REL-202604010101")
+        qn90b_output(build="T-PTMAKUC-REL-202604010101", tizen=tizen)
     )
     with pytest.raises(TargetCompatibilityError, match="build-specific addresses"):
         assessment.require_tested("QN90B UEP control")

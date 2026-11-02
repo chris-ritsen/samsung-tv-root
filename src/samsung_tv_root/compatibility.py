@@ -121,7 +121,7 @@ class ExploitCompatibilityProfile:
     tested_kernel: str
     kernel_family: str
     architecture: str
-    tizen_prefix: str
+    tizen_prefix: str | tuple[str, ...]
     required_capabilities: frozenset[str]
     capability_probes: tuple[str, ...]
     compatible_builds: frozenset[str] = frozenset()
@@ -239,7 +239,7 @@ QN90B_PROFILE = ExploitCompatibilityProfile(
     tested_kernel="5.4.77",
     kernel_family="5.4.",
     architecture="armv7l",
-    tizen_prefix="Tizen6.5/TV 6.5.",
+    tizen_prefix=("Tizen6.5/TV 6.5.", "Tizen6/TV 6.5."),
     required_capabilities=frozenset(("dotnet", "fdet-device", "pontusm-layout")),
     capability_probes=(
         _capability_probe(

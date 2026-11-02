@@ -2,12 +2,18 @@ import base64
 import re
 import socket
 import subprocess
+import threading
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from samsung_tv_root import sdb as sdb_module
-from samsung_tv_root.sdb import SdbClient, SdbError, build_shell_injection
+from samsung_tv_root.sdb import (
+    SdbBridgeProxy,
+    SdbClient,
+    SdbError,
+    build_shell_injection,
+)
 
 
 def test_shell_injection_round_trip() -> None:
@@ -21,6 +27,71 @@ def test_shell_injection_round_trip() -> None:
 def test_shell_injection_has_no_literal_space() -> None:
     injection = build_shell_injection("printf ok", gate_token="ab")
     assert " " not in injection
+
+
+def test_sdb_bridge_proxy_prepends_token_and_relays_frames() -> None:
+    bridge_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    bridge_listener.bind(("127.0.0.1", 0))
+    bridge_listener.listen(1)
+    bridge_listener.settimeout(2.0)
+    bridge_port = int(bridge_listener.getsockname()[1])
+    token = "a1" * 16
+    received: dict[str, bytes] = {}
+
+    def bridge_session() -> None:
+        connection, peer_address = bridge_listener.accept()
+        assert peer_address
+        with connection:
+            token_bytes = bytearray()
+            while len(token_bytes) < 32:
+                token_bytes.extend(connection.recv(32 - len(token_bytes)))
+            received["token"] = bytes(token_bytes)
+            connection.sendall(b"CNXN")
+            received["frame"] = connection.recv(4)
+
+    server_thread = threading.Thread(target=bridge_session, daemon=True)
+    server_thread.start()
+    proxy = SdbBridgeProxy("127.0.0.1", bridge_port, token)
+    proxy.start()
+    try:
+        proxy_port = int(proxy.serial.rsplit(":", 1)[1])
+        with socket.create_connection(("127.0.0.1", proxy_port), timeout=2.0) as client:
+            assert client.recv(4) == b"CNXN"
+            client.sendall(b"OPEN")
+        server_thread.join(timeout=2.0)
+        assert not server_thread.is_alive()
+        assert received == {"token": token.encode("ascii"), "frame": b"OPEN"}
+    finally:
+        proxy.close()
+        bridge_listener.close()
+
+
+def test_sdb_bridge_proxy_rejects_malformed_token() -> None:
+    with pytest.raises(SdbError, match="32 lowercase hexadecimal"):
+        SdbBridgeProxy("192.0.2.50", 26103, "not-a-token")
+
+
+def test_sdb_client_connects_through_local_bridge_proxy(monkeypatch) -> None:
+    client = SdbClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26104,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(client, "run", run)
+    client.connect()
+    serial = client.serial
+    client.disconnect()
+
+    assert serial.startswith("127.0.0.1:")
+    # connect() sweeps stale loopback devices before connecting.
+    assert calls == [("devices",), ("connect", serial), ("disconnect", serial)]
 
 
 def test_require_device_accepts_ready_serial(monkeypatch) -> None:
@@ -79,6 +150,33 @@ def test_require_shell_injection_rejects_missing_delay(monkeypatch) -> None:
         client.require_shell_injection()
 
 
+@pytest.mark.parametrize(
+    ("elapsed", "accepted"),
+    (
+        ((2.5, 2.1, 0.1, 2.1), True),
+        ((2.5, 0.1, 0.1, 0.1), False),
+    ),
+)
+def test_cold_shell_probe_retries_once_and_still_requires_delay(
+    monkeypatch, elapsed, accepted
+) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+    durations = iter(elapsed)
+    commands = []
+
+    def timed_injection(command, timeout):
+        commands.append(command)
+        return next(durations), subprocess.CompletedProcess(("sdb",), 1, "", "closed")
+
+    monkeypatch.setattr(client, "_timed_injection", timed_injection)
+    if accepted:
+        client.require_shell_injection()
+    else:
+        with pytest.raises(SdbError, match="shell execution was not confirmed"):
+            client.require_shell_injection()
+    assert commands == ["/bin/true", "/bin/sleep 2"] * 2
+
+
 def test_inject_rejects_oversized_appinstall_argument(monkeypatch) -> None:
     client = SdbClient(Path("sdb"), "192.0.2.50")
     monkeypatch.setattr(
@@ -105,12 +203,20 @@ def test_push_rejects_sdb_error_with_zero_exit(monkeypatch) -> None:
         client.push(Path("probe"), Path("/invalid/probe"))
 
 
-def test_capture_stages_oversized_command(monkeypatch) -> None:
+@pytest.mark.parametrize("default_newline", [None, "\r\n"], ids=["native", "windows"])
+def test_capture_stages_oversized_command(monkeypatch, default_newline) -> None:
     client = SdbClient(Path("sdb"), "192.0.2.50")
     staged: dict[str, object] = {}
+    path_write_text = Path.write_text
+
+    def write_text(path: Path, data: str, **kwargs) -> int:
+        kwargs.setdefault("newline", default_newline)
+        return path_write_text(path, data, **kwargs)
 
     def push(local_path: Path, remote_path: Path) -> None:
-        staged["script"] = local_path.read_text(encoding="utf-8")
+        script = local_path.read_bytes()
+        staged["script_bytes"] = script
+        staged["script"] = script.decode("utf-8")
         staged["remote_path"] = remote_path
 
     def inject(command: str, **kwargs) -> subprocess.CompletedProcess[str]:
@@ -124,9 +230,11 @@ def test_capture_stages_oversized_command(monkeypatch) -> None:
 
     monkeypatch.setattr(client, "push", push)
     monkeypatch.setattr(client, "inject", inject)
+    monkeypatch.setattr(Path, "write_text", write_text)
 
+    command = "set -eu\nprintf '" + ("x" * 1000) + "'"
     result = client.capture(
-        "printf '" + ("x" * 1000) + "'",
+        command,
         callback_host="127.0.0.1",
         bind_host="127.0.0.1",
         timeout=1.0,
@@ -142,6 +250,8 @@ def test_capture_stages_oversized_command(monkeypatch) -> None:
     assert str(staged["script"]).startswith(
         f"/bin/rm -f {staged['remote_path']}\n"
     )
+    assert b"\r" not in staged["script_bytes"]
+    assert command.encode("utf-8") in staged["script_bytes"]
 
 
 def test_capture_timeout_reports_active_listener_and_injection_exit(monkeypatch) -> None:
