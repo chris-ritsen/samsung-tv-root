@@ -14,6 +14,12 @@ their bundled documentation or the [v0.0.8 README](https://github.com/chris-rits
 - [Remote input](user/REMOTE_POLICY.md): opt-in observation, suppression, and
   remapping.
 
+## Device reports
+
+- [TQ55LS03FAUXXC / T-PTMFDEUC-0090-1301.0](reports/TQ55LS03FAUXXC.md):
+  first-hand archive-root success, authenticated UID 0, no kernel/USB exploit,
+  no persistence.
+
 ## Research notes
 
 These files preserve implementation, exploit reproduction, and reverse-

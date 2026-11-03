@@ -1,0 +1,25 @@
+{
+  "authenticated": true,
+  "cap_eff": "0000003fffffffff",
+  "commands": [
+    {
+      "command": "id",
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "uid=0(owner) gid=0(root) groups=0(root),29(audio),44(video),201(display),1901(log),6509(app_logging),6525(usb_device),10001(priv_externalstorage),10002(priv_externalstorage_appdata),10013(priv_tee_client),10014(priv_peripheralio),10212(priv_platform),10501(priv_camera),10502(priv_mediastorage),10503(priv_recorder),10704(priv_internet),10705(priv_network_get),10711(priv_tethering_admin),10901(priv_email),10903(priv_message_read),11103(priv_mapservice),11201(priv_appdebugging) context=\"User\"\n",
+      "timed_out": false
+    }
+  ],
+  "egid": 0,
+  "euid": 0,
+  "gid": 0,
+  "host": "<redacted>",
+  "model": null,
+  "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+  "runtime": "6.0",
+  "runtime_source": "explicit",
+  "smack": "User",
+  "staging_cleaned": true,
+  "system_files_unchanged": true,
+  "uid": 0
+}

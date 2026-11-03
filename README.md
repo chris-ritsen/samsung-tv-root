@@ -71,6 +71,12 @@ the row says otherwise. Root access and volatile UEP disable are separate result
 | Candidate, untested | S90F family on `T-RSMFAKUC-0090` | `1301.0` | SDB plus archive-launcher route is a static candidate | Do not infer the QN90F Mali chain merely from an `r48p0` userspace library |
 | Candidate, untested | QN80H / Frame 2026 on `T-PTMHAKUC-0100` | `1204.6` | SDB plus archive-launcher route is a static candidate | Tizen 10 image inspected offline; no retail root test |
 
+A first-hand archive-root result for the European **Frame 2025
+`TQ55LS03FAUXXC` / `T-PTMFDEUC-0090-1301.0`** is recorded in
+[docs/reports/TQ55LS03FAUXXC.md](docs/reports/TQ55LS03FAUXXC.md). It used the
+v0.0.12 archive-root route, authenticated UID 0, and installed no persistence.
+The exact model/firmware was not present in the table above before this report.
+
 v0.0.10 includes runtime detection for Samsung's nonstandard `dotnet` apphost,
 which the Q60B, AU9072, and Q7F3A owners had worked around locally. Those owners
 have not yet confirmed an unmodified v0.0.10 or v0.0.11 release on their TVs.
