@@ -97,12 +97,23 @@ The host unit used on the test machine is (substitute your home path):
 ```ini
 [Service]
 ExecStart=/usr/bin/python3 $HOME/.local/share/samsung-tv-root/watchdog.py
-Restart=always
+Restart=on-failure
 RestartSec=15
 ```
 
 The watchdog requires the release binary and SDB at the paths documented in
 `tools/archive-root-watchdog.py`; adjust `SAMSUNG_TV_ROOT_HOME` for another host.
+
+The watchdog uses a `watchdog.lock` single-instance lock; a second invocation
+exits without acquiring root. The retry backoff after a failed acquisition was
+reduced to 20 seconds to shorten the post-boot telemetry window.
+
+On the test Deck, the systemd user manager was not reachable from the OpenCode
+sandbox, so an XDG autostart entry was also installed at
+`$HOME/.config/autostart/samsung-tv-root-watchdog.desktop`. Launching it with
+`gio launch` started the watchdog and the second instance was rejected by the
+lock. The user-systemd unit and `default.target.wants` link remain installed;
+actual login-time startup still needs an owner login/reboot check.
 
 ## Limits and rollback
 

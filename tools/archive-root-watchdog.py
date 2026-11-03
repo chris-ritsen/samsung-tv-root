@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fcntl
 import ipaddress
 import json
 import os
@@ -24,10 +25,11 @@ HOME = Path(os.environ.get("SAMSUNG_TV_ROOT_HOME", Path.home() / ".local/share/s
 STATE_HOME = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "samsung-tv-root"
 STATE_FILE = STATE_HOME / "watchdog-state.json"
 LOG_FILE = STATE_HOME / "watchdog.log"
+LOCK_FILE = STATE_HOME / "watchdog.lock"
 RELEASE = HOME / "release" / "samsung-tv-root"
 SDB = HOME / "sdb"
 POLL_SECONDS = 15
-FAILURE_BACKOFF_SECONDS = 120
+FAILURE_BACKOFF_SECONDS = 20
 PORT = 26101
 MODEL_PREFIX = "TQ55LS03"
 
@@ -182,6 +184,14 @@ def run(once: bool = False) -> int:
         log(f"missing runtime files under {HOME}")
         return 1
     STATE_HOME.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("another watchdog instance is already running", flush=True)
+        return 0
+    os.ftruncate(lock_fd, 0)
+    os.write(lock_fd, f"{os.getpid()}\n".encode())
     state = load_state()
     last_host = state.get("host")
     armed = False
