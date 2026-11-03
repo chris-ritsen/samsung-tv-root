@@ -78,6 +78,32 @@ Read-only root command:
   --accept-timeout 60 --command 'id' <TV_IP>
 ```
 
+## Auto-root on TV restart
+
+A host-side watchdog is included at `tools/archive-root-watchdog.py`. It finds
+the TV, waits for SDB, acquires archive-root once per reachable boot, and applies
+the telemetry stop set. It does **not** install a TV-side boot hook and does not
+make the TV root persistent; root remains volatile and the watchdog reacquires
+it after each restart.
+
+The watchdog also creates the persistent PISA/canalysis markers and re-applies
+the `/run` masks for content-recognition, content-cognition/UI, tagpro and
+media-analytics after each boot.
+
+The tested telemetry stop set is recorded in
+[telemetry-apply.json](../../evidence/TQ55LS03FAUXXC/telemetry-apply.json).
+The host unit used on the test machine is:
+
+```ini
+[Service]
+ExecStart=/usr/bin/python3 /home/deck/.local/share/samsung-tv-root/watchdog.py
+Restart=always
+RestartSec=15
+```
+
+The watchdog requires the release binary and SDB at the paths documented in
+`tools/archive-root-watchdog.py`; adjust `SAMSUNG_TV_ROOT_HOME` for another host.
+
 ## Limits and rollback
 
 - Root is **volatile**; reboot drops it. No boot persistence was installed.
@@ -91,7 +117,13 @@ Read-only root command:
   `/home/owner/share/tmp/sdk_tools/on-demand/archive-root-*`.
 - No debloat, service masking, package removal, Home/startup change, or CleanFrame
   change was made as part of this root result.
-- Reboot the TV to return to a non-root session.
+- Reboot the TV to return to a non-root session; the watchdog will reacquire
+  archive-root when the TV returns if it is running.
+- To restore telemetry services, remove the two PISA/canalysis markers, unmask
+  the runtime-masked units, reload systemd and start the units. The watchdog
+  includes the same list.
+- To stop auto-root, stop the host watchdog service/process and remove its
+  user-unit autostart link. The TV itself has no root persistence to remove.
 
 ## Disclosure
 
