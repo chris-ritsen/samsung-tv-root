@@ -1,0 +1,60 @@
+{
+  "authenticated": true,
+  "cap_eff": "0000003fffffffff",
+  "commands": [
+    {
+      "command": "mkdir -p /opt/usr/share/systemd/system && touch /opt/usr/share/systemd/system/pisa-service /opt/usr/share/systemd/system/canalysis-daemon",
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "",
+      "timed_out": false
+    },
+    {
+      "command": "systemctl --no-block stop pisa-service.path pisa-service.service adagent-service.service canalysis-service.service",
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "",
+      "timed_out": false
+    },
+    {
+      "command": "systemctl mask --runtime contents-recognition-service.service org.tizen.tv.tagpro-service-tv.service",
+      "exit_code": 0,
+      "stderr": "Created symlink /run/systemd/system/contents-recognition-service.service \u2192 /dev/null.\nCreated symlink /run/systemd/system/org.tizen.tv.tagpro-service-tv.service \u2192 /dev/null.\n",
+      "stdout": "",
+      "timed_out": false
+    },
+    {
+      "command": "systemctl --no-block stop contents-recognition-service.service org.tizen.tv.tagpro-service-tv.service",
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "",
+      "timed_out": false
+    },
+    {
+      "command": "systemctl daemon-reload",
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "",
+      "timed_out": false
+    },
+    {
+      "command": "systemctl is-active pisa-service.service adagent-service.service canalysis-service.service contents-recognition-service.service org.tizen.tv.tagpro-service-tv.service",
+      "exit_code": 3,
+      "stderr": "",
+      "stdout": "failed\nfailed\ninactive\ninactive\ninactive\n",
+      "timed_out": false
+    }
+  ],
+  "egid": 0,
+  "euid": 0,
+  "gid": 0,
+  "host": "<redacted>",
+  "model": null,
+  "preflight_capabilities": "/usr/bin/dotnet cap_setgid,cap_sys_admin=ei\n/usr/sbin/sdbd-tarlauncher cap_setgid,cap_setuid=eip",
+  "runtime": "6.0",
+  "runtime_source": "explicit",
+  "smack": "User",
+  "staging_cleaned": true,
+  "system_files_unchanged": true,
+  "uid": 0
+}
