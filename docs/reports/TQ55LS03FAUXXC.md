@@ -92,11 +92,11 @@ media-analytics after each boot.
 
 The tested telemetry stop set is recorded in
 [telemetry-apply.json](../../evidence/TQ55LS03FAUXXC/telemetry-apply.json).
-The host unit used on the test machine is:
+The host unit used on the test machine is (substitute your home path):
 
 ```ini
 [Service]
-ExecStart=/usr/bin/python3 /home/deck/.local/share/samsung-tv-root/watchdog.py
+ExecStart=/usr/bin/python3 $HOME/.local/share/samsung-tv-root/watchdog.py
 Restart=always
 RestartSec=15
 ```
@@ -117,6 +117,11 @@ The watchdog requires the release binary and SDB at the paths documented in
   `/home/owner/share/tmp/sdk_tools/on-demand/archive-root-*`.
 - No debloat, service masking, package removal, Home/startup change, or CleanFrame
   change was made as part of this root result.
+- Reboot-test status: the TV firmware has no `reboot.target`; `systemctl reboot`
+  failed with `Unit reboot.target not found`. A physical power cycle is needed
+  to prove cold-boot reacquisition. The watchdog has been started and has applied
+  the telemetry set once, but this report does not claim a completed cold-boot
+  test yet.
 - Reboot the TV to return to a non-root session; the watchdog will reacquire
   archive-root when the TV returns if it is running.
 - To restore telemetry services, remove the two PISA/canalysis markers, unmask
