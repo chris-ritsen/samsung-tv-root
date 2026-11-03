@@ -117,13 +117,18 @@ The watchdog requires the release binary and SDB at the paths documented in
   `/home/owner/share/tmp/sdk_tools/on-demand/archive-root-*`.
 - No debloat, service masking, package removal, Home/startup change, or CleanFrame
   change was made as part of this root result.
-- Reboot-test status: the TV firmware has no `reboot.target`; `systemctl reboot`
-  failed with `Unit reboot.target not found`. A physical power cycle is needed
-  to prove cold-boot reacquisition. The watchdog has been started and has applied
-  the telemetry set once, but this report does not claim a completed cold-boot
-  test yet.
+- Cold-boot validation: after a physical TV power cycle, the watchdog detected
+  the TV offline, retried while SDB was still starting, then authenticated root
+  again. The telemetry units were inactive after boot and core TV services were
+  running. The surviving `screen-analysis-service-manager` was intentionally
+  left running pending a picture/AI impact decision.
+- The watchdog log excerpt is in
+  [watchdog-reboot.txt](../../evidence/TQ55LS03FAUXXC/watchdog-reboot.txt).
 - Reboot the TV to return to a non-root session; the watchdog will reacquire
   archive-root when the TV returns if it is running.
+- The watchdog auto-start link is in the Deck user systemd configuration. It was
+  not possible to query the host user manager from the OpenCode sandbox; the
+  current background process is running.
 - To restore telemetry services, remove the two PISA/canalysis markers, unmask
   the runtime-masked units, reload systemd and start the units. The watchdog
   includes the same list.

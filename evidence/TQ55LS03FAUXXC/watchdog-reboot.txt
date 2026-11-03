@@ -1,0 +1,12 @@
+2026-11-03T09:11:02Z watchdog started
+2026-11-03T09:11:12Z root result rc=0 authenticated=True uid=0 staging_cleaned=True system_files_unchanged=True
+2026-11-03T09:11:12Z telemetry controls applied
+2026-11-03T09:24:15Z TV offline; root will be re-applied when it returns
+2026-11-03T09:24:43Z root result rc=0 authenticated=True uid=0 staging_cleaned=True system_files_unchanged=True
+2026-11-03T09:24:43Z telemetry controls applied
+2026-11-03T09:26:00Z TV offline; root will be re-applied when it returns
+2026-11-03T09:29:06Z root attempt returned non-JSON rc=1: sdb connect failed with exit 1: connecting to <TV_IP>:26101 ...
+failed to connect to <TV_IP>:26101
+
+2026-11-03T09:31:20Z root result rc=0 authenticated=True uid=0 staging_cleaned=True system_files_unchanged=True
+2026-11-03T09:31:20Z telemetry controls applied
