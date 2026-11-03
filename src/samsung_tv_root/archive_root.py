@@ -121,6 +121,16 @@ def _check_target(client: SdbClient, runtime: str | None = None) -> TargetAssess
     if not all(
         "e" in dotnet_caps.get(name, "") for name in ("cap_setgid", "cap_sys_admin")
     ):
+        presence = _capture(
+            client,
+            "if test -e /usr/bin/dotnet; then echo present; else echo missing; fi",
+        )
+        if presence == "missing":
+            raise ArchiveRootError(
+                "TV is missing /usr/bin/dotnet; archive-root requires Samsung's "
+                "capability-bearing dotnet host. dotnet-launcher is not a "
+                "supported substitute, and --runtime cannot replace the host"
+            )
         raise ArchiveRootError("dotnet lacks effective SETGID/SYS_ADMIN capabilities")
     if not all(
         "e" in launcher_caps.get(name, "") for name in ("cap_setgid", "cap_setuid")
@@ -189,7 +199,7 @@ def _prepare_artifacts(
     )
     _openssl("pkey", "-in", str(private_key), "-pubout", "-out", str(public_key))
     (directory / "passwd").write_text(
-        "owner:x:0:0:owner:/home/owner:/bin/sh\n", encoding="ascii"
+        "owner:x:0:0:owner:/home/owner:/bin/sh\n", encoding="ascii", newline="\n"
     )
     runtime_version = "3.1.0" if runtime == "3.1" else "6.0.0"
     runtime_config = {
@@ -338,12 +348,15 @@ async def probe(
             try:
                 connection = await server.accept(accept_timeout)
             except Exception as error:
-                log_result = await asyncio.to_thread(
-                    client.capture,
-                    f"/bin/cat {STAGING_ROOT / package}/launcher.log",
-                    timeout=10,
-                )
-                log = log_result.output.strip()
+                try:
+                    log_result = await asyncio.to_thread(
+                        client.capture,
+                        f"/bin/cat {STAGING_ROOT / package}/launcher.log",
+                        timeout=10,
+                    )
+                    log = log_result.output.strip()
+                except SdbError as log_error:
+                    log = f"unavailable: {log_error}"
                 launch_output = "pending"
                 if launch_task.done():
                     try:
@@ -351,7 +364,8 @@ async def probe(
                     except Exception as launch_error:
                         launch_output = str(launch_error)
                 raise ArchiveRootError(
-                    f"no authenticated root callback; launch output: {launch_output}; "
+                    f"no authenticated root callback: {error}; "
+                    f"launch output: {launch_output}; "
                     f"launcher log: {log}"
                 ) from error
             try:
@@ -394,6 +408,7 @@ async def probe(
                     )
             return evidence
     finally:
+        primary_error = sys.exception()
         await server.close()
         if launch_task is not None and not launch_task.done():
             try:
@@ -406,14 +421,39 @@ async def probe(
                 cleaned = await asyncio.to_thread(_cleanup, client, package)
             except (ArchiveRootError, SdbError):
                 pass
-        final_hashes = await asyncio.to_thread(_capture, client, SYSTEM_HASH_COMMAND)
+        try:
+            final_hashes = await asyncio.to_thread(_capture, client, SYSTEM_HASH_COMMAND)
+        except (ArchiveRootError, SdbError) as verification_error:
+            detail = (
+                "final system-file verification could not be completed: "
+                f"{verification_error}; staging={STAGING_ROOT / package}"
+            )
+            if primary_error is not None:
+                if not isinstance(primary_error, Exception):
+                    raise primary_error from None
+                raise ArchiveRootError(
+                    f"{primary_error}; additionally, {detail}"
+                ) from primary_error
+            result = (
+                "root callback authenticated"
+                if "evidence" in locals()
+                else "root attempt ended"
+            )
+            raise ArchiveRootError(f"{result}, but {detail}") from verification_error
         if "evidence" in locals():
             evidence["system_files_unchanged"] = (
                 final_hashes == assessment.original_hashes
             )
             evidence["staging_cleaned"] = cleaned
             if not evidence["system_files_unchanged"] or not cleaned:
-                raise ArchiveRootError(
+                detail = (
                     "root callback succeeded, but system-file or cleanup checks failed; "
                     f"staging={STAGING_ROOT / package}"
                 )
+                if primary_error is not None:
+                    if not isinstance(primary_error, Exception):
+                        raise primary_error
+                    raise ArchiveRootError(
+                        f"{primary_error}; additionally, {detail}"
+                    ) from primary_error
+                raise ArchiveRootError(detail)

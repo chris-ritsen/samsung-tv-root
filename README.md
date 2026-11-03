@@ -65,10 +65,25 @@ the row says otherwise. Root access and volatile UEP disable are separate result
 | Reported, downstream | `QN55S90DAFXZA` (S90D) | `T-PTMDAKUC-0090-2130.0` | SDB plus capability/mount-namespace/archive-launcher route | [Owner's route description](https://www.reddit.com/r/Tizen/comments/1wl4e0n/i_made_a_minimal_plexyoutube_launcher_the_default/) and [Couchroot device record](https://github.com/splitcipher/couchroot/blob/main/docs/lab/devices/s90d/README.md) |
 | Reported, downstream | `QE50Q80AATXZT` (Q80A) | `T-NKM2DEUC-2301.1` | Vetro's archive-launcher-derived integration; authenticated root agent | [Vetro compatibility record](https://github.com/andrearicci93/vetro#compatibility); not this CLI/release |
 | Reported, downstream | `QE43Q67BAUXXH` (Q67B) | `T-NKLBDEUC-1720.7` | Vetro integration reported UID 0 | [Community diagnostic in Vetro](https://github.com/andrearicci93/vetro#compatibility); cold-boot persistence and device controls unverified |
+| Reported | `QN55QN85DBGXZD` (QN85D) | `T-PTMDUABC-0090-2130.0` | Archive-launcher route; UID/GID 0 and successful cleanup | [Owner's report #11](https://github.com/chris-ritsen/samsung-tv-root/issues/11); release version not specified; separate ad-service changes do not qualify other models |
+| Reported, adapted | `QE65Q60BAUXXN` (Q60B) | `T-NKLBDEUC-1720.7` | Archive-launcher route; authenticated UID 0 | [Owner's report #12](https://github.com/chris-ritsen/samsung-tv-root/issues/12); later boot-agent installation and staging fix belong to the downstream fork |
+| Reported, adapted | `QE55LS03AAUXXN` (Frame 2021) | `T-NKM2DEUC-2310.0`, build `202607211844` | v0.0.12 archive payloads; authenticated UID 0 | [Owner's report #14](https://github.com/chris-ritsen/samsung-tv-root/issues/14); macOS TCP relays and explicit runtime 3.1, not unmodified transport |
+| Reported, public release | `QN48S90FAEXZA` (S90F) | `T-RSMFAKUC-0090-REL-202607141953` | v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #15](https://github.com/chris-ritsen/samsung-tv-root/issues/15); automatic runtime 6.0; no Mali or UEP qualification |
+| Reported, public release | `QN85QN90AAFXZA` (QN90A) | `T-NKM2AKUC-REL-202607211843` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #18](https://github.com/chris-ritsen/samsung-tv-root/issues/18); newer build than the downstream record above; runtime 3.1; UEP untested |
+| Reported, public release | `LS27BG652EUXEN` (Odyssey G6) | `T-PTMLWWC-1720.7`, build `202602250227` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #19](https://github.com/chris-ritsen/samsung-tv-root/issues/19); automatic runtime 3.1 and successful cleanup |
+| Reported, public release | `QE43Q60AAUXZT` (Q60A) | `T-NKLADEUC-2301.1`, build `202511120357` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #20](https://github.com/chris-ritsen/samsung-tv-root/issues/20); automatic runtime 3.1 and successful cleanup |
+| Reported, adapted | `QN55QEF1AFXZX` (QEF1, MX) | `T-RSLFAKUC-0090-1300.9` | Archive-launcher route; authenticated UID 0 | [Owner's report #23](https://github.com/chris-ritsen/samsung-tv-root/issues/23); v0.0.9 source with a direct-SDB wrapper; stock Windows transport failed |
+| Reported, public source | `QE65QN95AATXXU` (QN95A) | `T-NKM2DEUC-2310.0`, build `202607211844` | Unmodified v0.0.12 source and payloads; authenticated UID 0 | [Owner's report #29](https://github.com/chris-ritsen/samsung-tv-root/issues/29); runtime 3.1; later persistence and UEP tools are downstream additions |
+| Reported, public release | `UE55AU7100KXXU` (AU7100) | `T-KSU2EDEUC-2310.0` | v0.0.11/v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #30](https://github.com/chris-ritsen/samsung-tv-root/issues/30); runtime 3.1; reported internal build is approximate |
+| Reported, adapted | `QA85QN85AAUXZN` (QN85A) | `T-NKM2UABC-2301.1` | v0.0.12 archive payload with diagnostic launch script; UID 0 | [Owner's report #31](https://github.com/chris-ritsen/samsung-tv-root/issues/31); SNAT prevented the stock authenticated callback; root was checked with a separate challenge |
+| Reported, public release | `UA85DU7700WXXY` (DU7700) | `2130.0`, `T-KSU2EDUABC-0090-REL-202605141701` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 | [Owner's report #32](https://github.com/chris-ritsen/samsung-tv-root/issues/32); automatic runtime 6.0; QN90F model preflight does not apply |
+| Reported, public release | `QE50LS01BAUXXH` (Serif 2022) | `T-PTMDEUC-REL-202602250226` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 in two sessions | [Owner's report #35](https://github.com/chris-ritsen/samsung-tv-root/issues/35); FDET and UEP untested; root acquisition itself stages files despite read-only user commands |
+| Reported, public release | `QE55Q60CAUXRU` (Q60C) | `T-NKLCEUC-0080-2032.1` | v0.0.12 archive-launcher route; authenticated UID 0 and command execution | [Owner's report #39](https://github.com/chris-ritsen/samsung-tv-root/issues/39); Windows x86-64, automatic runtime 6.0 and successful cleanup |
+| Reported, public release | `QA77S85FAEXXY` (S85F) | `T-PTMFUABC-0090-1301.0` | Unmodified v0.0.12 archive-launcher route; authenticated UID 0 in five same-boot sessions | [Owner's evidence in PR #41](https://github.com/chris-ritsen/samsung-tv-root/pull/41); macOS ARM64; runtime 6.0; fifth session used a wrapper around the release; UEP and reboot reacquisition untested |
 | Candidate, untested | Other QN90B variants using `T-PTMAKUC-1602.3` | `1602.3` | FDET route has an identical vulnerable handler in the decrypted update | Same firmware code is strong evidence, but no other size/region was root-tested here |
 | Candidate, untested | Other QN90F variants using the inspected `T-RSMF*` firmware | `1131.0`, `1296.8`, `1301.0` | SDB and archive-launcher prerequisites are present in inspected images | Mali kernel exploitability and the live runtime/preflight remain unverified; 1301.0 is proven only on the model above |
 | Candidate, untested | QN80F / Frame 2025 on `T-PTMFAKUC-0090` | `1131.0`, `1301.0` | SDB plus archive-launcher route is a static candidate | Files and SDB pattern found offline; no live root result or proven Mali route |
-| Candidate, untested | S90F family on `T-RSMFAKUC-0090` | `1301.0` | SDB plus archive-launcher route is a static candidate | Do not infer the QN90F Mali chain merely from an `r48p0` userspace library |
+| Candidate, untested | Other S90F variants on `T-RSMFAKUC-0090` | `1301.0` | SDB plus archive-launcher route is a static candidate | The exact S90F report above does not qualify other variants or the QN90F Mali chain |
 | Candidate, untested | QN80H / Frame 2026 on `T-PTMHAKUC-0100` | `1204.6` | SDB plus archive-launcher route is a static candidate | Tizen 10 image inspected offline; no retail root test |
 
 v0.0.10 includes runtime detection for Samsung's nonstandard `dotnet` apphost,
@@ -79,6 +94,29 @@ On one `UN50M75HAGXZD` running Tizen 10, [the owner reports](https://github.com/
 that SDB connects but rejects this package-name injection before archive-root
 preflight can run. This is an exact-build foothold failure, not evidence that all
 Tizen 10 TVs reject the route.
+
+Additional reports describe prerequisite failures rather than successful root:
+
+- [Q60R #22](https://github.com/chris-ritsen/samsung-tv-root/issues/22) and
+  [NU7100 #33](https://github.com/chris-ritsen/samsung-tv-root/issues/33): SDB
+  connected, but the package-name timing probe did not confirm shell execution.
+  This result alone does not establish whether the injection is patched or the
+  host transport failed.
+- [NKL/Tizen 5.5 #37](https://github.com/chris-ritsen/samsung-tv-root/issues/37)
+  and [TU8070 #38](https://github.com/chris-ritsen/samsung-tv-root/issues/38):
+  `/usr/bin/dotnet` is missing. The current route cannot substitute
+  `dotnet-launcher`; choosing `--runtime` does not supply the required host.
+- [TU7092 #40](https://github.com/chris-ritsen/samsung-tv-root/issues/40): the
+  capability check failed. The report does not yet distinguish an absent
+  executable from missing capabilities on an existing one.
+- [U8000 #24](https://github.com/chris-ritsen/samsung-tv-root/issues/24) and
+  [U7005F #43](https://github.com/chris-ritsen/samsung-tv-root/issues/43):
+  compatibility questions without a root result. PR #42's different U8000
+  unit does not establish a result for the exact TV in #24.
+
+Root acquisition does not establish persistence, safe package removal, or UEP
+bypass. The boot-agent issues describe downstream software not included in the
+public v0.0.12 release.
 
 The [QN90D fork's experimental branch](https://github.com/lzongren/samsung-tv-root/blob/codex/qn90d-hdmi-wake-service/docs/qn90d-hdmi-wake.md)
 describes an archive-root-assisted installation on `QN50QN90DAFXZA`, firmware
@@ -201,8 +239,10 @@ and extract the archive matching the host:
 
 Each archive contains a standalone host executable, TV payloads built from this
 source, documentation, and the corresponding source tree. Samsung's `sdb` is
-not redistributed; install [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
-separately.
+not redistributed. Install [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
+separately, or use Samsung's standalone SDB package. The
+[quick start](QUICKSTART.md#1-install-sdb) includes a verified Linux x86-64
+download; the full IDE is not required.
 
 Run the installation check:
 

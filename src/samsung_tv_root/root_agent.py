@@ -421,6 +421,7 @@ class RootAgentServer:
         self.require_root = require_root
         self._accepted: asyncio.Future[RootAgentConnection] | None = None
         self._server: asyncio.Server | None = None
+        self._unexpected_peer: str | None = None
 
     @property
     def listening_port(self) -> int:
@@ -432,6 +433,7 @@ class RootAgentServer:
         if self._server is not None:
             raise RuntimeError("root-agent server is already started")
         self._accepted = asyncio.get_running_loop().create_future()
+        self._unexpected_peer = None
         self._server = await asyncio.start_server(
             self._handle_connection,
             self.bind_host,
@@ -447,8 +449,15 @@ class RootAgentServer:
         try:
             return await asyncio.wait_for(asyncio.shield(self._accepted), timeout)
         except TimeoutError as error:
+            detail = ""
+            if self._unexpected_peer is not None:
+                detail = (
+                    f"; rejected a connection from {self._unexpected_peer}, "
+                    f"expected TV address {self.expected_peer}. "
+                    "Check for NAT/SNAT or a relay changing the callback source address"
+                )
             raise RootAgentUnavailableError(
-                f"no authenticated root agent connected within {timeout:g}s"
+                f"no authenticated root agent connected within {timeout:g}s{detail}"
             ) from error
 
     async def close(self) -> None:
@@ -493,7 +502,12 @@ class RootAgentServer:
         accepted = self._accepted
         peer = writer.get_extra_info("peername")
         peer_host = str(peer[0]) if peer else ""
-        if peer_host != self.expected_peer or accepted is None or accepted.done():
+        if accepted is None or accepted.done():
+            await _close_writer(writer)
+            return
+        if peer_host != self.expected_peer:
+            if self._unexpected_peer is None:
+                self._unexpected_peer = peer_host or "an unknown address"
             await _close_writer(writer)
             return
         _configure_keepalive(writer)
