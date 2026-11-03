@@ -1,9 +1,32 @@
 # Quick start
 
-## 1. Install Tizen Studio
+## 1. Install SDB
 
-Install Tizen Studio from Samsung/Tizen. This project does not redistribute
-Samsung's `sdb` executable.
+Install [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
+from Samsung/Tizen, or use Samsung's standalone SDB package. This project does
+not redistribute Samsung's `sdb` executable.
+
+On Linux x86-64, the standalone package is enough for this tool; the full IDE
+is not required. Download and verify it before extracting or running it:
+
+```console
+curl -fLO https://download.tizen.org/sdk/tizenstudio/official/binary/sdb_4.2.36_ubuntu-64.zip
+printf '%s  %s\n' \
+  addf825e1a886a9f220cb3d287e74438cae0ffafe5821b9baca9d4f6c7de5124 \
+  sdb_4.2.36_ubuntu-64.zip | sha256sum -c -
+```
+
+Only after the checksum reports `OK`:
+
+```console
+unzip sdb_4.2.36_ubuntu-64.zip
+./sdb-pkg/data/tools/sdb version
+```
+
+The checksum is published in Samsung's
+[Linux package index](https://download.tizen.org/sdk/tizenstudio/official/pkg_list_ubuntu-64).
+Pass the extracted executable's absolute path with `--sdb /path/to/sdb` before
+the subcommand. This package is for x86-64 hosts, not Linux ARM64.
 
 ## 2. Enable Developer Mode
 
@@ -13,7 +36,9 @@ On the TV:
 2. Focus App Settings and enter `12345`.
 3. Enable Developer Mode.
 4. Enter the controller computer's LAN IPv4 address.
-5. Reboot the TV.
+5. Fully reboot the TV; a short press of Power may only enter standby. Owners
+   of some models report needing to unplug the TV for about a minute and
+   reconnect it before SDB starts. Do not interrupt an update or active use.
 
 ## 3. Check the release
 
@@ -29,7 +54,7 @@ payloads; they do not require a local payload build. Put an unusual Tizen Studio
 location before the command, for example
 `./samsung-tv-root --sdb /path/to/sdb doctor`.
 
-These instructions describe v0.0.11 and the current source tree. `archive-root`
+These instructions describe v0.0.12 and the current source tree. `archive-root`
 requires v0.0.9 or newer, or a source checkout. For v0.0.8 and earlier downloads,
 follow the bundled documentation or the
 [v0.0.8 README](https://github.com/chris-ritsen/samsung-tv-root/blob/v0.0.8/README.md).
@@ -123,6 +148,19 @@ acquisition and cleanup; it is not a read-only preflight:
 ./samsung-tv-root archive-root probe 192.0.2.50
 ./samsung-tv-root archive-root root 192.0.2.50 --command 'id'
 ```
+
+Other models should use this generic route, not a QN90B/QN90F profile chosen
+only for its year or Tizen version. See the
+[exact-model reports](README.md#tv-compatibility).
+`doctor` checks the host installation, not TV compatibility. A missing
+`/usr/bin/dotnet` or missing effective capabilities is a route prerequisite
+failure; `--runtime` only selects an installed compatible runtime and cannot
+supply the missing host or privileges.
+
+The callback must reach the listening host port with the TV's source address
+preserved. Check host firewall and macOS Local Network permissions if callbacks
+time out; NAT/SNAT and TCP relays can change that address and cause rejection.
+Keep the peer-address check enabled.
 
 This route was live-tested on QN90B and QN90F. It does not yet provide an
 interactive shell, disable UEP, or replace the controller's root method. It
