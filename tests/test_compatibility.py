@@ -108,10 +108,11 @@ def test_qn90b_uep_remains_limited_to_tested_addresses() -> None:
         assessment.require_tested("QN90B UEP control")
 
 
-def test_reviewed_s95b_build_is_compatible_untested() -> None:
+def test_reviewed_s95b_build_is_tested() -> None:
     # Reviewed on a QE55S95BATXXH (S95B), a 2022 PontusM sibling of the tested
     # QN90B: identical live platform fingerprint, regional /etc/tizen-release
-    # spelling, FDET root with the .NET Core 3.1 payload build.
+    # spelling, FDET root with the .NET Core 3.1 payload build, and the fixed
+    # UEP gate verified at the same physical address.
     assessment = QN90B_PROFILE.assess(
         qn90b_output(
             build="T-PTMDEUC-REL-202602250226",
@@ -119,11 +120,8 @@ def test_reviewed_s95b_build_is_compatible_untested() -> None:
         )
     ).require_compatible()
 
-    assert assessment.status is CompatibilityStatus.COMPATIBLE
-    assert assessment.differences == (
-        "build T-PTMDEUC-REL-202602250226 differs from "
-        "T-PTMAKUC-REL-202310071804",
-    )
+    assert assessment.status is CompatibilityStatus.TESTED
+    assert assessment.differences == ()
 
 
 def test_unreviewed_s95b_build_fails_closed() -> None:
@@ -138,15 +136,15 @@ def test_unreviewed_s95b_build_fails_closed() -> None:
         assessment.require_compatible()
 
 
-def test_reviewed_s95b_build_uep_stays_limited_to_tested_addresses() -> None:
+def test_reviewed_s95b_build_uep_is_tested() -> None:
     assessment = QN90B_PROFILE.assess(
         qn90b_output(
             build="T-PTMDEUC-REL-202602250226",
             tizen="Tizen6/TV 6.5.0 (arm)",
         )
-    )
-    with pytest.raises(TargetCompatibilityError, match="build-specific addresses"):
-        assessment.require_tested("QN90B UEP control")
+    ).require_tested("QN90B UEP control")
+
+    assert assessment.status is CompatibilityStatus.TESTED
 
 
 def test_qn90b_release_spelling_alone_keeps_tested_build_tested() -> None:

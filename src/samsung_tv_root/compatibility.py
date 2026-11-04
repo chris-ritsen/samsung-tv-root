@@ -242,8 +242,14 @@ def _capability_probe(name: str, condition: str) -> str:
 # the .NET Core 3.1 payload build. Its /etc/tizen-release is spelled
 # "Tizen6/TV 6.5.0 (arm)" (TZ_BUILD_RELEASE_NAME="Tizen6/TV"). Only that exact
 # reviewed build is accepted outside the tested family; other builds of the
-# line fail closed until reviewed. The fixed-address UEP gate stays limited to
-# tested builds.
+# line fail closed until reviewed.
+#
+# The fixed-address UEP gate was re-verified on this build on 2026-11-05. The
+# running image is an uncompressed ARM Image in mmcblk0p6: SfdUepPacketHandler
+# clears virtual 0xc08c26c4 / physical 0x208c26c4, and
+# SfdUepVerifyFileSignature reads the same word to skip signature verification.
+# A read-only physical read observed 1, and a compare-before-write 1 -> 0 with
+# readback succeeded, so this build is admitted to the UEP tested set.
 QN90B_PROFILE = ExploitCompatibilityProfile(
     name="qn90b",
     tested_build="T-PTMAKUC-REL-202310071804",
@@ -266,7 +272,7 @@ QN90B_PROFILE = ExploitCompatibilityProfile(
             "&& grep -q 'model=4kbtin' /proc/cmdline",
         ),
     ),
-    compatible_builds=frozenset(("T-PTMDEUC-REL-202602250226",)),
+    additional_tested_builds=frozenset(("T-PTMDEUC-REL-202602250226",)),
 )
 
 

@@ -30,8 +30,8 @@ matches the tested platform (SDK foothold, Linux 5.4.77, ARMv7, Samsung
 FDET route produced an authenticated UID-0 root agent with the .NET Core 3.1
 payload build, including clean agent shutdown. Only that exact reviewed build
 is accepted outside the tested family; other builds of the line fail closed
-until reviewed. It classifies as `compatible-untested`, never as `tested`, and
-the fixed UEP address below has not been validated on it.
+until reviewed. It classifies as `tested`, and the fixed UEP address below was
+re-verified on it (§UEP).
 
 Three host-side differences matter on that unit:
 
@@ -107,5 +107,11 @@ uv run samsung-tv-root qn90b uep "$TV_IP" disable
 ```
 
 The transition is volatile and is restored by rebooting the TV.
-Unlike the root scan, this fixed UEP address is restricted to the exact tested
-build.
+
+The address was independently re-verified on the reviewed S95B build
+`T-PTMDEUC-REL-202602250226` (2022 PontusM, Linux 5.4.77) on 2026-11-05. Its
+uncompressed ARM image in `mmcblk0p6` has `SfdUepPacketHandler` clearing the same
+virtual `0xc08c26c4` / physical `0x208c26c4` word, and `SfdUepVerifyFileSignature`
+reads it to skip signature verification. A read-only physical read observed `1`,
+and a compare-before-write `1 -> 0` with readback succeeded. Other builds of the
+line still fail closed until their kernel images are checked the same way.
