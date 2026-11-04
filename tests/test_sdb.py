@@ -144,6 +144,80 @@ def test_capture_stages_oversized_command(monkeypatch) -> None:
     )
 
 
+def test_capture_stages_previously_direct_regional_drop_zone_command(
+    monkeypatch,
+) -> None:
+    # A European QN90B (T-PTMDEUC-REL-202602250226) silently discarded direct
+    # injections of 487 bytes and above. A 499-byte capture used to be sent
+    # directly because it is below the hard 510-byte appinstall limit; it must
+    # now be staged instead.
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+    command = "printf '" + "x" * 170 + "'"
+    wrapped = (
+        "exec 3<>/dev/tcp/127.0.0.1/55555;"
+        f"{{ {command}; }} >&3 2>&3;"
+        "printf '\\n[exit:%s]\\n' \"$?\" >&3;exec 3>&-"
+    )
+    size = sdb_module._injection_argument_size(wrapped)
+    assert size == 499
+    assert sdb_module.SDB_CAPTURE_DIRECT_MAX_SAFE_BYTES < size <= (
+        sdb_module.SDB_APPINSTALL_MAX_SAFE_BYTES
+    )
+    staged: dict[str, object] = {}
+
+    def push(local_path: Path, remote_path: Path) -> None:
+        staged["script"] = local_path.read_text(encoding="utf-8")
+
+    def inject(command: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        staged["launch"] = command
+        script = str(staged["script"])
+        match = re.search(r"/dev/tcp/127\.0\.0\.1/(\d+)", script)
+        assert match is not None
+        with socket.create_connection(("127.0.0.1", int(match.group(1)))) as peer:
+            peer.sendall(b"staged probe output\n[exit:0]\n")
+        return subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")
+
+    monkeypatch.setattr(client, "push", push)
+    monkeypatch.setattr(client, "inject", inject)
+
+    result = client.capture(
+        command,
+        callback_host="127.0.0.1",
+        bind_host="127.0.0.1",
+        timeout=1.0,
+    )
+
+    assert result.output == "staged probe output\n[exit:0]\n"
+    assert str(staged["launch"]).startswith(". ")
+
+
+def test_small_capture_uses_direct_injection_without_push(monkeypatch) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+
+    def inject(command: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        match = re.search(r"/dev/tcp/127\.0\.0\.1/(\d+)", command)
+        assert match is not None
+        with socket.create_connection(("127.0.0.1", int(match.group(1)))) as peer:
+            peer.sendall(b"direct probe output\n[exit:0]\n")
+        return subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")
+
+    monkeypatch.setattr(
+        client,
+        "push",
+        lambda *args, **kwargs: pytest.fail("small capture must not stage"),
+    )
+    monkeypatch.setattr(client, "inject", inject)
+
+    result = client.capture(
+        "id",
+        callback_host="127.0.0.1",
+        bind_host="127.0.0.1",
+        timeout=1.0,
+    )
+
+    assert result.output == "direct probe output\n[exit:0]\n"
+
+
 def test_capture_timeout_reports_active_listener_and_injection_exit(monkeypatch) -> None:
     client = SdbClient(Path("sdb"), "192.0.2.50")
     result = subprocess.CompletedProcess(("sdb",), 1, "", "closed\n")

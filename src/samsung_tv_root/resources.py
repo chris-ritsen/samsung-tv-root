@@ -51,6 +51,10 @@ PAYLOAD_FILES = {
 }
 
 
+# The .NET Core 3.1 build of the QN90B payload set carries the same files.
+PAYLOAD_FILES["qn90b31"] = PAYLOAD_FILES["qn90b"]
+
+
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
 
@@ -72,7 +76,6 @@ def payload_directory(model: str) -> Path:
 
     repository_root = Path(__file__).resolve().parents[2]
     return repository_root / "payloads" / model / "out"
-
 
 def missing_payloads(model: str, directory: Path | None = None) -> tuple[str, ...]:
     payloads = directory or payload_directory(model)

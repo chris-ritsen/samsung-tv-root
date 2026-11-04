@@ -68,6 +68,7 @@ REQUIRED_SWU_PRELOADS = (
     "libswu-init-integrity-preload.so",
     "libswu-init-oracle-batch-preload.so",
 )
+REQUIRED_PAYLOADS["qn90b31"] = REQUIRED_PAYLOADS["qn90b"]
 RELEASE_DOCUMENTS = (
     "README.md",
     "QUICKSTART.md",

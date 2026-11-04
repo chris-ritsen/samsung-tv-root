@@ -4,17 +4,18 @@ CLANG ?= clang
 LLD ?= $(firstword $(wildcard /usr/lib/llvm*/bin/ld.lld))
 
 QN90B_OUT := payloads/qn90b/out
+QN90B31_OUT := payloads/qn90b31/out
 QN90F_OUT := payloads/qn90f/out
 COMMON_OUT := payloads/common/out
 COMMON31_OUT := payloads/common31/out
 SWU_OUT := swu/out
 
-.PHONY: all payloads common-payload common31-payload qn90b-payload qn90f-payload swu-preloads lint test \
+.PHONY: all payloads common-payload common31-payload qn90b-payload qn90b31-payload qn90f-payload swu-preloads lint test \
 	audit release clean
 
 all: payloads swu-preloads
 
-payloads: common-payload common31-payload qn90b-payload qn90f-payload
+payloads: common-payload common31-payload qn90b-payload qn90b31-payload qn90f-payload
 
 common-payload:
 	rm -rf "$(COMMON_OUT)"
@@ -70,6 +71,33 @@ qn90b-payload: common-payload
 		"$(QN90B_OUT)/SamsungTvEventAgent.dll"
 	cp "$(COMMON_OUT)/SamsungTvEventAgent.runtimeconfig.json" \
 		"$(QN90B_OUT)/SamsungTvEventAgent.runtimeconfig.json"
+
+qn90b31-payload:
+	rm -rf "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/FdetProbe.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/Qn90bSourceControl.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/Qn90bDisplayControl.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/SamsungTvRootAgent.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/SamsungTvRemoteInputAgent.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 $(DOTNET) build payloads/qn90b31/SamsungTvEventAgent.csproj \
+		--configuration Release --output "$(QN90B31_OUT)"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/FdetProbe.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/Qn90bSourceControl.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/Qn90bDisplayControl.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/SamsungTvRootAgent.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/SamsungTvRemoteInputAgent.runtimeconfig.json"
+	cp payloads/qn90b/FdetProbe.runtimeconfig.json \
+		"$(QN90B31_OUT)/SamsungTvEventAgent.runtimeconfig.json"
 
 qn90f-payload: common-payload
 	rm -rf "$(QN90F_OUT)"
@@ -144,4 +172,4 @@ release: all lint test audit
 	uv run python tools/build_release.py
 
 clean:
-	rm -rf "$(COMMON_OUT)" "$(COMMON31_OUT)" "$(QN90B_OUT)" "$(QN90F_OUT)" "$(SWU_OUT)" dist
+	rm -rf "$(COMMON_OUT)" "$(COMMON31_OUT)" "$(QN90B_OUT)" "$(QN90B31_OUT)" "$(QN90F_OUT)" "$(SWU_OUT)" dist

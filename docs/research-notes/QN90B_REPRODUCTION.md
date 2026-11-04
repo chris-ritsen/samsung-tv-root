@@ -13,11 +13,44 @@
 - SDK foothold `uid=901(sdk) gid=901(sdk)` with the Tizen System SMACK label
 
 An exact build match is not required for the root attempt. Compatibility is
-based on the `T-PTMAKUC` firmware family, Tizen 6.5, Linux 5.4 on ARMv7, the
-PontusM `sdp_sparsemem` layout, and read/write access to
+based on the `T-PTMAKUC` firmware family and individually reviewed compatible
+builds, Tizen 6.5 (`/etc/tizen-release` observed as both
+`Tizen6.5/TV 6.5.0 (arm)` and `Tizen6/TV 6.5.0 (arm)`), Linux 5.4 on ARMv7,
+the PontusM `sdp_sparsemem` layout, and read/write access to
 `/dev/sdp_pqe_fdet`. An untested compatible build receives one bounded attempt.
 The payload discovers and validates its own task and credential objects, and a
 missing object or failed structural check aborts the attempt.
+
+The reviewed compatible build `T-PTMDEUC-REL-202602250226` belongs to a
+`QE55S95BATXXH` (S95B), a 2022 PontusM sibling of the tested QN90B: its
+`/etc/prd_info.ini` records `Model=T-PTMDEUC`, `Version=T-PTMDEUC-1720.7`, and
+`Build=TIZEN-TRUNK2022-PontusM-RELEASE_20260225.1`. Its live fingerprint
+matches the tested platform (SDK foothold, Linux 5.4.77, ARMv7, Samsung
+`dotnet`, `/dev/sdp_pqe_fdet`, and the PontusM command-line layout), and the
+FDET route produced an authenticated UID-0 root agent with the .NET Core 3.1
+payload build, including clean agent shutdown. Only that exact reviewed build
+is accepted outside the tested family; other builds of the line fail closed
+until reviewed. It classifies as `tested`, and the fixed UEP address below was
+re-verified on it (§UEP).
+
+Three host-side differences matter on that unit:
+
+- The stock payloads target .NET 6 and abort with a `System.Runtime`
+  `6.0.0.0` `FileLoadException` on its .NET Core 3.1.3 CLR. Run
+  `make qn90b31-payload` for such units. Preflight reads the active runtime
+  with `readlink -f /usr/share/dotnet.tizen/netcoreapp` and selects the 3.1
+  payload set only when a 3.1.x CLR is positively identified; custom
+  `--payload-directory` values are never switched.
+- Direct package-name injections of 487 bytes and above were silently
+  discarded, while 475-byte injections and staged scripts still ran. Captures
+  therefore stage through `sdb push` above a 448-byte direct ceiling.
+- Its 3.1 CLR leaves inherited file descriptors open in child processes
+  (unlike .NET 6). The background root-agent launch closes the capture
+  descriptor (`3>&-`) so the launch capture reaches EOF once the probe exits.
+
+An occasional small injection was also lost outright on this unit and worked
+on a direct retry. A command that fails with no TV callback at all is worth
+one retry before deeper debugging.
 
 ## Chain
 
@@ -74,5 +107,11 @@ uv run samsung-tv-root qn90b uep "$TV_IP" disable
 ```
 
 The transition is volatile and is restored by rebooting the TV.
-Unlike the root scan, this fixed UEP address is restricted to the exact tested
-build.
+
+The address was independently re-verified on the reviewed S95B build
+`T-PTMDEUC-REL-202602250226` (2022 PontusM, Linux 5.4.77) on 2026-11-05. Its
+uncompressed ARM image in `mmcblk0p6` has `SfdUepPacketHandler` clearing the same
+virtual `0xc08c26c4` / physical `0x208c26c4` word, and `SfdUepVerifyFileSignature`
+reads it to skip signature verification. A read-only physical read observed `1`,
+and a compare-before-write `1 -> 0` with readback succeeded. Other builds of the
+line still fail closed until their kernel images are checked the same way.

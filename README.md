@@ -66,6 +66,7 @@ the row says otherwise. Root access and volatile UEP disable are separate result
 | Reported, downstream | `QE50Q80AATXZT` (Q80A) | `T-NKM2DEUC-2301.1` | Vetro's archive-launcher-derived integration; authenticated root agent | [Vetro compatibility record](https://github.com/andrearicci93/vetro#compatibility); not this CLI/release |
 | Reported, downstream | `QE43Q67BAUXXH` (Q67B) | `T-NKLBDEUC-1720.7` | Vetro integration reported UID 0 | [Community diagnostic in Vetro](https://github.com/andrearicci93/vetro#compatibility); cold-boot persistence and device controls unverified |
 | Candidate, untested | Other QN90B variants using `T-PTMAKUC-1602.3` | `1602.3` | FDET route has an identical vulnerable handler in the decrypted update | Same firmware code is strong evidence, but no other size/region was root-tested here |
+| Reported, adapted | `QE55S95BATXXH` (S95B) | `T-PTMDEUC-1720.7`, build `T-PTMDEUC-REL-202602250226` | FDET route with the .NET Core 3.1 payload build; authenticated root agent and UID-0 command execution | 2022 PontusM sibling of the tested QN90B (`TIZEN-TRUNK2022-PontusM-RELEASE_20260225.1` in `/etc/prd_info.ini`); active CLR 3.1.3 needs `qn90b31` payloads (auto-selected); UEP validated at the same `0x208c26c4` gate (1 -> 0 with readback, volatile) |
 | Candidate, untested | Other QN90F variants using the inspected `T-RSMF*` firmware | `1131.0`, `1296.8`, `1301.0` | SDB and archive-launcher prerequisites are present in inspected images | Mali kernel exploitability and the live runtime/preflight remain unverified; 1301.0 is proven only on the model above |
 | Candidate, untested | QN80F / Frame 2025 on `T-PTMFAKUC-0090` | `1131.0`, `1301.0` | SDB plus archive-launcher route is a static candidate | Files and SDB pattern found offline; no live root result or proven Mali route |
 | Candidate, untested | S90F family on `T-RSMFAKUC-0090` | `1301.0` | SDB plus archive-launcher route is a static candidate | Do not infer the QN90F Mali chain merely from an `r48p0` userspace library |
@@ -176,6 +177,11 @@ payloads once:
 make common-payload qn90b-payload qn90f-payload
 .venv/bin/python -m samsung_tv_root doctor
 ```
+
+For a QN90B-family TV whose active .NET runtime is 3.1.x, also run
+`make qn90b31-payload`. Preflight detects the active CLR and stages that
+variant automatically; the .NET Core 3.1 reference assemblies are restored
+from NuGet, so a 3.1 SDK is not required.
 
 Then use `.venv/bin/python -m samsung_tv_root qn90f root ...`. On Windows,
 replace `.venv/bin/python` with `.venv\Scripts\python.exe`; the payload build

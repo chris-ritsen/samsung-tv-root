@@ -88,6 +88,7 @@ class Qn90bRootBackend:
                 accept_timeout=20.0,
                 command_timeout=15.0,
                 payload_directory=payload_directory("qn90b"),
+                legacy_payload_directory=payload_directory("qn90b31"),
             )
         )
         lease = await acquirer.acquire()
