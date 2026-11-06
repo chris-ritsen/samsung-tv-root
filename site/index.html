@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samsung TV root, untethered — the chain explained</title>
+<meta name="description" content="How a Samsung Tizen TV re-acquires root by itself at every boot: a vendor AT-HUB.service hook, a signed gawk interpreter, a token-gated sdb bridge, and a Magisk-style module system.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0e14'/%3E%3Cpath d='M14 22l12 10-12 10' stroke='%23f0b429' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M30 44h20' stroke='%23f0b429' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#12161f; --panel2:#161b26; --line:#232a38;
+    --fg:#d7dde8; --dim:#8b94a7; --gold:#f0b429; --green:#39d98a; --blue:#6cb6ff; --red:#ff7a7a;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.6}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:54rem;margin:0 auto;padding:0 1.25rem}
+  header{padding:4rem 0 2.5rem;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:clamp(1.8rem,4.5vw,2.8rem);line-height:1.15;margin:.4rem 0 .8rem;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:1.05rem;max-width:42rem}
+  .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.4rem}
+  .chip{font-family:var(--mono);font-size:.75rem;border:1px solid var(--line);border-radius:999px;padding:.3rem .75rem;color:var(--dim);background:var(--panel)}
+  .chip.g{color:var(--green);border-color:#1d3a2c}
+  section{padding:3rem 0;border-bottom:1px solid var(--line)}
+  h2{font-size:1.35rem;margin:0 0 1.2rem;letter-spacing:-.01em}
+  h2 .no{font-family:var(--mono);color:var(--gold);font-size:.9rem;margin-right:.6rem}
+  p{margin:.7rem 0;max-width:46rem}
+  .note{border-left:3px solid var(--gold);background:var(--panel);padding: .85rem 1rem;border-radius:0 .5rem .5rem 0;color:var(--dim);font-size:.92rem;max-width:46rem}
+  .chain{display:flex;flex-direction:column;gap:0;margin:1.6rem 0}
+  .step{border:1px solid var(--line);background:var(--panel);border-radius:.6rem;padding: .9rem 1.1rem;max-width:46rem}
+  .step.vendor{border-style:dashed;border-color:#2c3550}
+  .step.ours{border-color:#4a3c14;background:linear-gradient(180deg,#16140c,#12161f)}
+  .step .t{font-family:var(--mono);font-size:.92rem;color:var(--fg)}
+  .step .m{font-family:var(--mono);font-size:.78rem;color:var(--dim);margin-top:.3rem}
+  .step .tag{font-family:var(--mono);font-size:.7rem;padding:.1rem .5rem;border-radius:.3rem;margin-left:.5rem;vertical-align:2px}
+  .tag.g{background:#0d2b1e;color:var(--green)}
+  .tag.y{background:#2b230d;color:var(--gold)}
+  .tag.b{background:#0d233b;color:var(--blue)}
+  .arrow{align-self:flex-start;margin-left:1.4rem;color:var(--dim);font-family:var(--mono);font-size:.9rem;line-height:1.4}
+  ul.modules{list-style:none;padding:0;margin:1.2rem 0;max-width:46rem}
+  ul.modules li{border:1px solid var(--line);background:var(--panel);border-radius:.5rem;padding:.65rem .9rem;margin:.45rem 0;font-size:.95rem}
+  ul.modules code{font-family:var(--mono);color:var(--gold);font-size:.85rem}
+  ul.modules span{color:var(--dim)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem;margin:1.4rem 0;max-width:46rem}
+  .card{border:1px solid var(--line);background:var(--panel);border-radius:.6rem;padding:1rem 1.1rem}
+  .card h3{margin:.1rem 0 .5rem;font-size:1rem}
+  .card p{margin:0;font-size:.88rem;color:var(--dim)}
+  .card .era{font-family:var(--mono);font-size:.7rem;color:var(--gold);letter-spacing:.1em;text-transform:uppercase}
+  .tl{display:flex;flex-direction:column;gap:1rem}
+  code{font-family:var(--mono);font-size:.85em;background:var(--panel2);border:1px solid var(--line);border-radius:.3rem;padding:.08rem .35rem}
+  footer{padding:2.5rem 0 4rem;color:var(--dim);font-size:.85rem}
+  footer .links a{margin-right:1.2rem;font-family:var(--mono);font-size:.8rem}
+  @media (max-width:40rem){.arrow{margin-left:.9rem}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">levkropp / samsung-tv-root-untethered</div>
+    <h1>Samsung TV root, untethered</h1>
+    <p class="sub">How a Samsung Tizen TV re-acquires <strong>root by itself at every power-on</strong> —
+    no host computer, no app squat, no visible window — through a stock Samsung
+    service hook, a signed gawk interpreter, a token-gated sdb bridge, and a
+    Magisk-style module system.</p>
+    <div class="chips">
+      <span class="chip g">root at uptime ~10s</span>
+      <span class="chip">Tizen 6.5 · armv7l</span>
+      <span class="chip">QN55Q60B / T-NKLBAKUC-1720.7</span>
+      <span class="chip">no Developer Mode dependency</span>
+      <span class="chip">rollback = one file copy</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2><span class="no">01</span>The boot chain</h2>
+    <p>Every step below runs <em>on the TV</em>. The host computer is not in the
+    chain — it only connects later, optionally, for maintenance.</p>
+
+    <div class="chain">
+      <div class="step vendor">
+        <div class="t">power-on → systemd <code>starter.target</code><span class="tag b">vendor</span></div>
+        <div class="m">Tizen boot sequence begins.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step vendor">
+        <div class="t"><code>AT-HUB.service</code><span class="tag b">vendor</span></div>
+        <div class="m">A stock Samsung unit symlinked from <code>starter.target.wants</code>.
+        No <code>User=</code> setting → runs as <strong>uid 0</strong>, SMACK
+        <code>System::Privileged</code>. Its <code>ExecStart</code> is
+        <code>/opt/etc/parseinfo.sh &amp;</code> — a script on the writable, persistent <code>/opt</code> vdfs.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step ours">
+        <div class="t"><code>#!/usr/bin/gawk -f</code> — our hook replaces <code>/opt/etc/parseinfo.sh</code><span class="tag y">ours</span></div>
+        <div class="m">Preserves the vendor behavior 1:1 (writes
+        <code>__REPO__MODEL__</code> to <code>/proc/target_version</code>),
+        then starts the runner. Stock bytes are backed up first and verified by SHA-256.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step ours">
+        <div class="t"><code>runner.sh</code> — proof, labels, boot-settle gate<span class="tag y">ours</span></div>
+        <div class="m">Writes the <code>SELFROOT-PROOF uid=0</code> evidence file, sets SMACK
+        labels on the evidence directory, waits for the systemd job queue to
+        drain, then runs every enabled module.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step ours">
+        <div class="t">module loop → bridge, masks, watchdogs<span class="tag g">result</span></div>
+        <div class="m">Re-creates the bridge unit in tmpfs, masks/stops Samsung's
+        telemetry and ad daemons, launches supervised watchdogs — idempotently, every boot.</div>
+      </div>
+    </div>
+
+    <div class="note"><strong>Why gawk?</strong> Kernel UEP excludes <code>#!</code>
+    scripts from its target types, so systemd can exec the hook — but
+    <code>sh</code>/<code>bash</code> refuse to load <em>unsigned script files</em>
+    (the stock <code>parseinfo.sh</code> carries a Samsung <code>##UEP</code> signature
+    trailer for exactly that reason). Signed <code>/usr/bin/gawk</code> is not linked
+    against <code>libkUEPUser.so</code>, so it reads the hook as plain data, and its
+    <code>system()</code> shells out without script-file arguments. A plain
+    <code>#!/bin/sh</code> replacement execs — then exits 1 having run nothing.</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="no">02</span>The one-time foothold</h2>
+    <p>Persistence was installed from a root session obtained with
+    <a href="https://github.com/chris-ritsen/samsung-tv-root">upstream's archive-root route</a>
+    (credit: chris-ritsen):</p>
+    <div class="chain">
+      <div class="step vendor">
+        <div class="t">Developer Mode <code>sdbd</code> + SVE-2025-50109 package-name injection<span class="tag b">foothold</span></div>
+        <div class="m">A crafted package name in an allowed installer call yields a shell as <code>uid 901(sdk)</code>.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step vendor">
+        <div class="t">archive-root: Samsung's own <code>/usr/bin/dotnet</code> (cap-bearing) + signed tar launcher<span class="tag b">escalation</span></div>
+        <div class="m">A per-run mount namespace and Samsung's signed-archive launch path yield
+        <code>uid 0</code> — no firmware files modified, everything volatile and verifiable.</div>
+      </div>
+      <div class="arrow">│</div>
+      <div class="step ours">
+        <div class="t">install the hook once, restore <code>ghservice</code> to stock<span class="tag y">ours</span></div>
+        <div class="m">From then on, the TV roots itself at every boot; the foothold is only needed again after a <code>/opt</code> wipe.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="no">03</span>What runs at every boot</h2>
+    <p>The module system is Magisk-style: each module is a directory under
+    <code>/opt/usr/share/selfroot/modules/</code> with a <code>boot.sh</code>,
+    a <code>disabled</code> flag, and per-module logs. The runner honors UI/host
+    enable/disable overrides and skips disabled modules.</p>
+    <ul class="modules">
+      <li><code>at-hub-persistence</code> <span>— the vendor-hook installer; owns <code>/opt/etc/parseinfo.sh</code>, backup + rollback.</span></li>
+      <li><code>bridge-service</code> <span>— token-gated sdb relay as a headless <code>Restart=always</code> systemd service; the host CLI works while Developer Mode Host PC IP stays <code>127.0.0.1</code>.</span></li>
+      <li><code>samsung-telemetry-off</code> <span>— masks data-service/pushd/bms/appbinary-manager, plants vendor opt-out switches, kills ACR/voice/Bixby/SSO/CIS respawns, supervises a 30s watchdog.</span></li>
+      <li><code>ad-telemetry-daemons-off</code> <span>— masks and stops the ad/analysis daemons (adagent, pisa, canalysis, context-aware, contents-recognition).</span></li>
+      <li><code>sw-update-off</code> <span>— keeps the firmware update path inert so the pinned exploit surface stays pinned.</span></li>
+      <li><code>cec-key-passthrough</code> <span>— stops the TV eating CEC remote keys so HDMI-CEC devices (e.g. a Fire TV stick) respond instantly.</span></li>
+      <li><code>00-canary</code> <span>— boot-order canary + evidence markers.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="no">04</span>Three eras of the chain</h2>
+    <div class="tl grid">
+      <div class="card">
+        <div class="era">era 1 · host-driven</div>
+        <h3>Upstream toolkit</h3>
+        <p>Volatile root reacquired from a computer over sdb at every power-on.
+        Solid, but needs a host on the LAN.</p>
+      </div>
+      <div class="card">
+        <div class="era">era 2 · app squat</div>
+        <h3>Boot agent in <code>com.samsung.tv.ghservice</code></h3>
+        <p>A .NET agent replaced the preinstalled Gaming Hub service app and
+        self-rooted at boot. Worked — but the platform surfaced its window over
+        HDMI sources, and the squat meant package-DB and manifest surgery.</p>
+      </div>
+      <div class="card">
+        <div class="era">era 3 · vendor hook</div>
+        <h3>AT-HUB.service + gawk</h3>
+        <p>Root at boot via a stock Samsung service whose ExecStart lives on
+        writable <code>/opt</code>. No window, no package DB, no app squat —
+        and <code>ghservice</code> is back to stock bytes. Shipped 2026-11-06.</p>
+      </div>
+    </div>
+    <p style="margin-top:1.2rem">Era 3 is what runs today. The retired squat
+    agent's source and its full write-up remain in the repo for other models
+    where no writable boot-executed script exists.</p>
+  </div>
+</section>
+
+<section style="border-bottom:none">
+  <div class="wrap">
+    <h2><span class="no">05</span>Safety profile</h2>
+    <ul class="modules">
+      <li><span>Read-only rootfs untouched; everything persistent lives on the rw <code>/opt</code> vdfs. Nothing hooks the boot chain or firmware image.</span></li>
+      <li><span>Stock <code>parseinfo.sh</code> backed up byte-exact before replacement; rollback is <code>cp</code> + reboot.</span></li>
+      <li><span><code>ghservice</code> restored to stock: dll, runtimeconfig and manifest byte-verified against the pre-squat tarball; package DB row reverted.</span></li>
+      <li><span>Developer Mode survives reboots independently, so the sdb foothold remains a recovery lifeline even if the hook is wiped.</span></li>
+      <li><span>UEP is never disabled system-wide; unsigned execution flows only through the documented stdin and signed-interpreter paths.</span></li>
+      <li><span>A firmware update that reinstalls <code>parseinfo.sh</code> simply returns the TV to stock — re-run the installer from any root session.</span></li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/levkropp/samsung-tv-root-untethered">source</a>
+      <a href="https://github.com/levkropp/samsung-tv-root-untethered/tree/untethered-boot-agent/modules/at-hub-persistence">the module</a>
+      <a href="https://github.com/chris-ritsen/samsung-tv-root">upstream toolkit</a>
+      <a href="https://github.com/chris-ritsen/samsung-tv-root/issues/1">issue #1 · the Q60B write-up</a>
+      <a href="https://github.com/chris-ritsen/samsung-tv-root/issues/17">issue #17 · the AT-HUB insight</a>
+    </div>
+    <p>Unlicense. Everything here is model- and firmware-specific (verified on
+    T-NKLBAKUC-1720.7 / Tizen 6.5). Your TV, your warranty. No Samsung firmware,
+    keys, or device identifiers are published in this repo.</p>
+  </div>
+</footer>
+
+</body>
+</html>
