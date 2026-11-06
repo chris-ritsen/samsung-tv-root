@@ -1,5 +1,19 @@
 # TVRoot Manager — Project Brief & Handoff Spec
 
+**Post-squat milestone (2026-11-06):** the ghservice squat is **retired**.
+Boot-time root now runs through the vendor `AT-HUB.service` →
+`/opt/etc/parseinfo.sh` gawk hook (`modules/at-hub-persistence/`), proven
+across two cold boots on 1720.7: root at uptime ~10s, SMACK
+`System::Privileged`, vendor `target_version` write preserved, bridge +
+modules + watchdog all applied, no Developer Mode dependency. ghservice was
+restored to stock (svcapp/offboot/nodisplay; dll+runtimeconfig from `.tvbk`,
+manifest from the preserve tarball, DB row reverted, `res/selfroot` staging
+removed) — the manager can never surface over HDMI again. See the module
+README for install/rollback/retire procedures and two platform gotchas:
+the agent's `QuoteArgument` doubles backslashes in `--command` (deploy
+payloads via base64), and `systemctl stop` at `starter.target` blocks on
+mid-activation units (runner waits for the job queue to drain).
+
 **Status:** planning document · **Date:** 2026-10-09 · **Fork:** `levkropp/samsung-tv-root-untethered`
 **Upstream:** `chris-ritsen/samsung-tv-root` · **Working issue:** https://github.com/chris-ritsen/samsung-tv-root/issues/1
 **Inspiration:** https://github.com/GLinnik21/plx-native (LG webOS native Plex client; this project's "step in that direction" is a native, self-rooting, module-managed Tizen TV)

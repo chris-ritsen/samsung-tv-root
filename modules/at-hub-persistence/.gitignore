@@ -1,0 +1,3 @@
+# Samsung vendor content (repo policy: no Samsung firmware in-tree).
+# Stage from ~/tv-preserve/1720.7/parseinfo.sh.stock when deploying.
+parseinfo.sh.stock

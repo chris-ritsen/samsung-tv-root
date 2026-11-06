@@ -1,0 +1,9 @@
+{
+  "id": "at-hub-persistence",
+  "name": "AT-HUB boot-time root (vendor parseinfo.sh gawk hook)",
+  "version": "1.0.0",
+  "description": "Replaces the vendor /opt/etc/parseinfo.sh (executed as root by AT-HUB.service at every boot) with a signed-gawk hook that preserves the vendor target_version write and starts the tvroot runner (bridge + modules). Root at boot with no ghservice squat and no Developer Mode dependency; survives rootfs wipes/reinstalls since only the persistent rw /opt vdfs is touched. Uninstall: restore the module backup over /opt/etc/parseinfo.sh and reboot.",
+  "author": "levkropp",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}
