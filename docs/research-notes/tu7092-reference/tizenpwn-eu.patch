@@ -1,0 +1,619 @@
+diff --git a/payloads/tu7000/cifs-lab/server.py b/payloads/tu7000/cifs-lab/server.py
+index 9da0ab5..27a51dd 100644
+--- a/payloads/tu7000/cifs-lab/server.py
++++ b/payloads/tu7000/cifs-lab/server.py
+@@ -16,6 +16,7 @@ SHARE_ROOT = "/srv/cifs-lab-share"
+ username = (SECRET_DIR / "username").read_text(encoding="utf-8")
+ password = (SECRET_DIR / "password").read_text(encoding="utf-8")
+ share = (SECRET_DIR / "share").read_text(encoding="ascii")
++share_writable = (SECRET_DIR / "share_writable").exists()
+ 
+ if username != "owner":
+     raise SystemExit("invalid fixed lab username")
+@@ -34,7 +35,12 @@ if not (
+ 
+ logger.init(True, False)
+ server = smbserver.SimpleSMBServer(listenAddress="0.0.0.0", listenPort=445)
+-server.addShare(share, SHARE_ROOT, "Disposable CIFS validation share", readOnly="yes")
++server.addShare(
++    share,
++    SHARE_ROOT,
++    "Disposable CIFS validation share",
++    readOnly="no" if share_writable else "yes",
++)
+ server.setSMB2Support(True)
+ server.setSMBChallenge("")
+ server.addCredential(username, 0, compute_lmhash(password), compute_nthash(password))
+diff --git a/src/tizenpwn/cli.py b/src/tizenpwn/cli.py
+index 916587b..fab8a90 100644
+--- a/src/tizenpwn/cli.py
++++ b/src/tizenpwn/cli.py
+@@ -12,6 +12,7 @@ from .persistence import inventory_target
+ from .sdb import SdbError
+ from .tu7000 import (
+     CONFIRMATION,
++    EU_CONFIRMATION,
+     CifsRouteError,
+     assess_target,
+     execute_command,
+@@ -62,6 +63,7 @@ def command_preflight(arguments: argparse.Namespace) -> int:
+     assessment = assess_target(
+         arguments.host,
+         sdb_timeout=arguments.sdb_timeout,
++        experimental_eu=arguments.experimental_eu,
+     )
+     if arguments.output == "json":
+         emit(assessment.to_dict(), arguments.output)
+@@ -74,6 +76,7 @@ def command_inventory(arguments: argparse.Namespace) -> int:
+     assessment = inventory_target(
+         arguments.host,
+         sdb_timeout=arguments.sdb_timeout,
++        experimental_eu=arguments.experimental_eu,
+     )
+     emit(assessment.to_dict(), arguments.output)
+     return 0
+@@ -85,6 +88,7 @@ def command_probe(arguments: argparse.Namespace) -> int:
+         confirm=arguments.confirm,
+         accept_saved_profile=arguments.accept_saved_profile,
+         sdb_timeout=arguments.sdb_timeout,
++        experimental_eu=arguments.experimental_eu,
+         callback_host=arguments.callback_host,
+         bind_host=arguments.bind_host,
+         rdp_port=arguments.rdp_port,
+@@ -103,6 +107,7 @@ def command_command(arguments: argparse.Namespace) -> int:
+         accept_saved_profile=arguments.accept_saved_profile,
+         commands=tuple(arguments.command),
+         sdb_timeout=arguments.sdb_timeout,
++        experimental_eu=arguments.experimental_eu,
+         callback_host=arguments.callback_host,
+         bind_host=arguments.bind_host,
+         rdp_port=arguments.rdp_port,
+@@ -110,6 +115,7 @@ def command_command(arguments: argparse.Namespace) -> int:
+         image=arguments.image,
+         agent_timeout=arguments.agent_timeout,
+         accept_timeout=arguments.accept_timeout,
++        export_share=arguments.export_share,
+     )
+     emit(evidence, arguments.output)
+     return next(
+@@ -122,12 +128,20 @@ def command_command(arguments: argparse.Namespace) -> int:
+     )
+ 
+ 
++def add_target_options(command: argparse.ArgumentParser) -> None:
++    command.add_argument(
++        "--experimental-eu", action="store_true",
++        help="opt in to exact UE55TU7092UXXH EU build; root is unproven",
++    )
++
++
+ def add_live_options(command: argparse.ArgumentParser) -> None:
++    add_target_options(command)
+     command.add_argument("host", help="TV IPv4 address")
+     command.add_argument(
+         "--confirm",
+         required=True,
+-        help=f"exact firmware confirmation phrase ({CONFIRMATION})",
++        help=f"exact firmware confirmation phrase ({CONFIRMATION}; EU: {EU_CONFIRMATION})",
+     )
+     command.add_argument(
+         "--accept-saved-profile",
+@@ -168,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
+         "preflight",
+         help="read-only exact-target and artifact assessment",
+     )
++    add_target_options(preflight)
+     preflight.add_argument("host", help="TV IPv4 address")
+     preflight.add_argument("--sdb-timeout", type=float, default=30.0)
+     preflight.set_defaults(handler=command_preflight)
+@@ -183,6 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
+         "inventory",
+         help="read-only discovery for a persistent SSH service",
+     )
++    add_target_options(inventory)
+     inventory.add_argument("host", help="TV IPv4 address")
+     inventory.add_argument("--sdb-timeout", type=float, default=30.0)
+     inventory.set_defaults(handler=command_inventory)
+@@ -207,6 +223,11 @@ def build_parser() -> argparse.ArgumentParser:
+         help="root shell command to run; repeat for multiple commands",
+     )
+     command.add_argument("--agent-timeout", type=float, default=30.0)
++    command.add_argument(
++        "--export-share",
++        type=Path,
++        help="copy files written to the temporary CIFS share to this directory",
++    )
+     command.set_defaults(handler=command_command)
+     return parser
+ 
+diff --git a/src/tizenpwn/tu7000.py b/src/tizenpwn/tu7000.py
+index 8683e7a..0dee6a7 100644
+--- a/src/tizenpwn/tu7000.py
++++ b/src/tizenpwn/tu7000.py
+@@ -1,6 +1,6 @@
+-"""TU7000 T-KTSU2AKUC-2743.0 Remote PC/CIFS one-shot root route.
++"""TU7000 US and experimental TU7092 EU Remote PC/CIFS one-shot root route.
+ 
+-This route is bound to one owner-observed target: an UN65TU7000FXZA running
++The validated route is bound to one owner-observed target: an UN65TU7000FXZA running
+ build T-KTSU2AKUC-REL-202607021959 (release T-KTSU2AKUC-2743.0). It uses the
+ SDB package-name foothold only for read-only assessment and for the two-push
+ UID-0 classifier. Root command execution comes from the reviewed Remote PC
+@@ -20,12 +20,13 @@ import os
+ import re
+ import secrets
+ import select
++import shutil
+ import socket
+ import subprocess
+ import sys
+ import tempfile
+ import time
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from pathlib import Path, PurePosixPath
+ 
+ from .compatibility import (
+@@ -40,6 +41,17 @@ MODEL = "UN65TU7000FXZA"
+ FIRMWARE = "T-KTSU2AKUC-2743.0"
+ TESTED_BUILD = "T-KTSU2AKUC-REL-202607021959"
+ CONFIRMATION = "TU7000-T-KTSU2AKUC-2743.0"
++EU_MODEL = "UE55TU7092UXXH"
++EU_FIRMWARE = "T-KTSU2DEUC-2743.0"
++EU_BUILD = "T-KTSU2DEUC-REL-202607022000"
++EU_CONFIRMATION = "TU7092-EU-T-KTSU2DEUC-2743.0"
++# Keep the validated US build as the evidence anchor. EU is never "tested".
++EU_PROFILE = replace(
++    TU7000_PROFILE,
++    name="tu7092-eu-experimental",
++    build_family="T-KTSU2DEUC-REL-",
++    compatible_builds=frozenset({EU_BUILD}),
++)
+ LAB_USER = "owner"
+ STAGING_DIRECTORY = PurePosixPath("/home/owner/share/tmp")
+ SDK_STAGING_DIRECTORY = PurePosixPath("/home/owner/share/tmp/sdk_tools")
+@@ -116,12 +128,19 @@ class Tu7000Assessment:
+     compatibility: TargetAssessment
+     artifacts: tuple[ArtifactVerification, ...]
+     system_hashes: str
++    experimental_eu: bool = False
++
++    @property
++    def firmware(self) -> str:
++        return EU_FIRMWARE if self.experimental_eu else FIRMWARE
+ 
+     def render(self) -> str:
+         lines = [
+             self.compatibility.render(),
+             f"Model: {self.model}",
+-            f"Firmware: {FIRMWARE}",
++            f"Firmware: {self.firmware}",
++            f"Experimental EU: {self.experimental_eu}",
++            "Root validation: not established by preflight",
+         ]
+         for artifact in self.artifacts:
+             state = "verified" if artifact.verified else "mismatch"
+@@ -131,7 +150,10 @@ class Tu7000Assessment:
+     def to_dict(self) -> dict[str, object]:
+         return {
+             "model": self.model,
+-            "firmware": FIRMWARE,
++            "firmware": self.firmware,
++            "experimental_eu": self.experimental_eu,
++            "root_validated_by_preflight": False,
++            "profile": self.compatibility.profile,
+             "status": self.compatibility.status.value,
+             "build": self.compatibility.fingerprint.build_id,
+             "kernel": self.compatibility.fingerprint.kernel_release,
+@@ -322,22 +344,35 @@ def assess_target(
+     sdb_timeout: float = DEFAULT_SDB_TIMEOUT,
+     client: SdbClient | None = None,
+     require_tested: bool = True,
++    experimental_eu: bool = False,
+ ) -> Tu7000Assessment:
+     ipaddress.IPv4Address(tv_host)
+     client = client or SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
+     client.connect()
+     client.require_device()
+     model = client.reported_model()
+-    if model != MODEL:
++    expected_model = EU_MODEL if experimental_eu else MODEL
++    if model != expected_model:
+         raise CifsRouteError(
+-            f"target reports model {model or 'unknown'}, expected {MODEL}"
++            f"target reports model {model or 'unknown'}, expected {expected_model}"
+         )
+     client.require_shell_injection()
+     output = _capture(client, PROBE_COMMAND, sdb_timeout)
+-    assessment = TU7000_PROFILE.assess(output)
++    profile = EU_PROFILE if experimental_eu else TU7000_PROFILE
++    assessment = profile.assess(output)
+     try:
+         assessment.require_compatible()
+-        if require_tested:
++        if experimental_eu:
++            if assessment.fingerprint.build_id != EU_BUILD:
++                raise CifsRouteError(
++                    f"experimental EU route requires exact build {EU_BUILD}"
++                )
++            if assessment.fingerprint.kernel_release != TU7000_PROFILE.tested_kernel:
++                raise CifsRouteError(
++                    "experimental EU route requires exact kernel "
++                    + TU7000_PROFILE.tested_kernel
++                )
++        elif require_tested:
+             assessment.require_tested("TU7000 CIFS route")
+     except TargetCompatibilityError as error:
+         raise CifsRouteError(str(error)) from error
+@@ -357,6 +392,7 @@ def assess_target(
+         compatibility=assessment,
+         artifacts=artifacts,
+         system_hashes=system_hashes,
++        experimental_eu=experimental_eu,
+     )
+ 
+ 
+@@ -580,6 +616,7 @@ class CifsLab:
+         bind: str,
+         rdp_port: int,
+         smb_port: int,
++        export_share: Path | None = None,
+         image: str | None = None,
+         runner: Runner | None = None,
+     ) -> None:
+@@ -593,6 +630,7 @@ class CifsLab:
+         self.bind = bind
+         self.rdp_port = rdp_port
+         self.smb_port = smb_port
++        self.export_share = export_share
+         self.runner = runner or Runner()
+         self.context_sha256 = lab_context_sha256()
+         self.image = image or (
+@@ -602,6 +640,7 @@ class CifsLab:
+         self._cleanup_armed = False
+         self._image_id: str | None = None
+         self._rdp_login_baseline = 0
++        self._share_dir: Path | None = None
+ 
+     @property
+     def client_container(self) -> str:
+@@ -717,6 +756,10 @@ class CifsLab:
+             path = directory / name
+             path.write_text(value, encoding="utf-8")
+             os.chmod(path, 0o600)
++        if self.export_share is not None:
++            path = directory / "share_writable"
++            path.write_text("1", encoding="ascii")
++            os.chmod(path, 0o600)
+         return directory
+ 
+     def start(self) -> None:
+@@ -731,6 +774,7 @@ class CifsLab:
+             raise CifsRouteError("lab source changed after its image was built")
+         self._image_id = self._verified_image_id(self._image_id)
+         secrets_dir = self._write_secrets()
++        self._share_dir = Path(tempfile.mkdtemp(prefix="tizenpwn-share-"))
+         arguments = (
+             "docker",
+             "run",
+@@ -747,6 +791,8 @@ class CifsLab:
+             f"{self.bind}:{self.smb_port}:445",
+             "--mount",
+             f"type=bind,source={secrets_dir},target=/run/cifs-lab-secrets,readonly",
++            "--mount",
++            f"type=bind,source={self._share_dir},target=/srv/cifs-lab-share",
+             "--label",
+             f"{IMAGE_LABEL}={self.context_sha256}",
+             self._image_id,
+@@ -756,6 +802,14 @@ class CifsLab:
+         self._wait_healthy()
+         self._require_exact_publish()
+ 
++    def export_share_files(self) -> None:
++        if self.export_share is None or self._share_dir is None:
++            return
++        self.export_share.mkdir(parents=True, exist_ok=True)
++        for entry in self._share_dir.iterdir():
++            if entry.is_file():
++                shutil.copy2(entry, self.export_share / entry.name)
++
+     def _require_container_absent(self, name: str) -> None:
+         result = self.runner.run(
+             ("docker", "inspect", name), timeout=10, check=False
+@@ -995,6 +1049,14 @@ class CifsLab:
+             )
+         return result.stdout + "\n" + result.stderr
+ 
++    @staticmethod
++    def smb_event_counts(logs: str) -> tuple[int, int]:
++        """Return the reviewed SMB marker count and a format-diagnostic count."""
++        return (
++            logs.count("NetrShareEnum Level: 1"),
++            logs.count("NetrShareEnum"),
++        )
++
+     def rdp_logs(self) -> str:
+         result = self.runner.run(
+             (
+@@ -1084,6 +1146,9 @@ class CifsLab:
+             if self._temporary is not None:
+                 self._temporary.cleanup()
+                 self._temporary = None
++            if self._share_dir is not None:
++                shutil.rmtree(self._share_dir, ignore_errors=True)
++                self._share_dir = None
+         if errors:
+             raise CifsRouteError(
+                 "one or more exact-name lab containers survived cleanup"
+@@ -1261,7 +1326,7 @@ def _form_card(
+     fingerprint: str,
+ ) -> None:
+     print("\nPRIVATE ONE-TIME REMOTE PC FORM VALUES (do not record this screen)")
+-    print(f"  TV: {assessment.model} / {FIRMWARE}")
++    print(f"  TV: {assessment.model} / {assessment.firmware}")
+     print(f"  PC/Profile address: {callback_host}")
+     print("  Protocol: RDP (not VNC)")
+     print(f"  Username: {LAB_USER}")
+@@ -1279,7 +1344,7 @@ def _agent_form_card(
+     fingerprint: str,
+ ) -> None:
+     print("\nPRIVATE ONE-TIME REMOTE PC FORM VALUES (do not record this screen)")
+-    print(f"  TV: {assessment.model} / {FIRMWARE}")
++    print(f"  TV: {assessment.model} / {assessment.firmware}")
+     print(f"  PC/Profile address: {callback_host}")
+     print("  Protocol: RDP (not VNC)")
+     print(f"  Username: {LAB_USER}")
+@@ -1362,10 +1427,12 @@ def execute_probe(
+     runner: Runner | None = None,
+     client: SdbClient | None = None,
+     sleep=time.sleep,
++    experimental_eu: bool = False,
+ ) -> dict[str, object]:
+-    if confirm != CONFIRMATION:
++    confirmation = EU_CONFIRMATION if experimental_eu else CONFIRMATION
++    if confirm != confirmation:
+         raise CifsRouteError(
+-            f"live mode requires --confirm {CONFIRMATION}"
++            f"live mode requires --confirm {confirmation}"
+         )
+     if not accept_saved_profile:
+         raise CifsRouteError(
+@@ -1384,7 +1451,10 @@ def execute_probe(
+     prompt = prompt or ConsolePrompter(accept_timeout)
+     runner = runner or Runner()
+     client = client or SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
+-    assessment = assess_target(tv_host, sdb_timeout=sdb_timeout, client=client)
++    assessment = assess_target(
++        tv_host, sdb_timeout=sdb_timeout, client=client,
++        experimental_eu=experimental_eu,
++    )
+     identity = fresh_identity()
+     lab = CifsLab(
+         identity,
+@@ -1397,7 +1467,8 @@ def execute_probe(
+     evidence: dict[str, object] = {
+         "model": assessment.model,
+         "host": tv_host,
+-        "firmware": FIRMWARE,
++        "firmware": assessment.firmware,
++        "experimental_eu": assessment.experimental_eu,
+         "build": assessment.compatibility.fingerprint.build_id,
+         "route": "remotepc-cifs",
+         "confirmation": confirm,
+@@ -1432,18 +1503,21 @@ def execute_probe(
+         )
+         lab.require_rdp_login()
+         evidence["rdp_logins"] = 1
+-        smb_before = lab.logs().count("NetrShareEnum Level: 1")
++        smb_before, smb_before_generic = lab.smb_event_counts(lab.logs())
+         prompt(
+             "Reveal the TV's top toolbar, click Shared Folder exactly once, "
+             "then return here. A wrong or repeated click is terminal.",
+             "CLICKED",
+         )
+         sleep(2)
+-        smb_after = lab.logs().count("NetrShareEnum Level: 1")
++        smb_after, smb_after_generic = lab.smb_event_counts(lab.logs())
+         if smb_after != smb_before + 1:
+             raise CifsRouteError(
+                 "the single SMB observation window did not contain exactly "
+-                "one share enumeration"
++                "one share enumeration "
++                f"(reviewed-marker delta={smb_after - smb_before}; "
++                f"generic NetrShareEnum delta="
++                f"{smb_after_generic - smb_before_generic})"
+             )
+         evidence["smb_enumeration_events"] = 1
+         if not classify_uid0_once(client, identity):
+@@ -1523,14 +1597,17 @@ def execute_command(
+     image: str | None = None,
+     agent_timeout: float = DEFAULT_AGENT_TIMEOUT,
+     accept_timeout: float = DEFAULT_ACCEPT_TIMEOUT,
++    export_share: Path | None = None,
+     prompt: ConsolePrompter | None = None,
+     runner: Runner | None = None,
+     client: SdbClient | None = None,
+     sleep=time.sleep,
++    experimental_eu: bool = False,
+ ) -> dict[str, object]:
+-    if confirm != CONFIRMATION:
++    confirmation = EU_CONFIRMATION if experimental_eu else CONFIRMATION
++    if confirm != confirmation:
+         raise CifsRouteError(
+-            f"live mode requires --confirm {CONFIRMATION}"
++            f"live mode requires --confirm {confirmation}"
+         )
+     if not accept_saved_profile:
+         raise CifsRouteError(
+@@ -1551,13 +1628,17 @@ def execute_command(
+     prompt = prompt or ConsolePrompter(accept_timeout)
+     runner = runner or Runner()
+     client = client or SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
+-    assessment = assess_target(tv_host, sdb_timeout=sdb_timeout, client=client)
++    assessment = assess_target(
++        tv_host, sdb_timeout=sdb_timeout, client=client,
++        experimental_eu=experimental_eu,
++    )
+     identity = fresh_agent_identity()
+     lab = CifsLab(
+         identity,
+         bind=bind,
+         rdp_port=rdp_port,
+         smb_port=smb_port,
++        export_share=export_share,
+         image=image,
+         runner=runner,
+     )
+@@ -1565,7 +1646,8 @@ def execute_command(
+     evidence: dict[str, object] = {
+         "model": assessment.model,
+         "host": tv_host,
+-        "firmware": FIRMWARE,
++        "firmware": assessment.firmware,
++        "experimental_eu": assessment.experimental_eu,
+         "build": assessment.compatibility.fingerprint.build_id,
+         "route": "remotepc-cifs",
+         "confirmation": confirm,
+@@ -1606,18 +1688,21 @@ def execute_command(
+         )
+         lab.require_rdp_login()
+         evidence["rdp_logins"] = 1
+-        smb_before = lab.logs().count("NetrShareEnum Level: 1")
++        smb_before, smb_before_generic = lab.smb_event_counts(lab.logs())
+         prompt(
+             "Reveal the TV's top toolbar, click Shared Folder exactly once, "
+             "then return here. A wrong or repeated click is terminal.",
+             "CLICKED",
+         )
+         sleep(2)
+-        smb_after = lab.logs().count("NetrShareEnum Level: 1")
++        smb_after, smb_after_generic = lab.smb_event_counts(lab.logs())
+         if smb_after != smb_before + 1:
+             raise CifsRouteError(
+                 "the single SMB observation window did not contain exactly "
+-                "one share enumeration"
++                "one share enumeration "
++                f"(reviewed-marker delta={smb_after - smb_before}; "
++                f"generic NetrShareEnum delta="
++                f"{smb_after_generic - smb_before_generic})"
+             )
+         evidence["smb_enumeration_events"] = 1
+         root_identity, results = agent.accept_and_run(
+@@ -1628,6 +1713,7 @@ def execute_command(
+         evidence["root_identity"] = root_identity
+         evidence["commands"] = results
+         evidence["classification"] = "authenticated-root-command"
++        lab.export_share_files()
+         return evidence
+     except BaseException as error:
+         primary_error = error
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 888d97e..5f334f4 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -98,3 +98,13 @@ def test_human_render_handles_nested_evidence() -> None:
+     assert "authenticated: true" in lines
+     assert "commands:" in lines
+     assert any("command: id" in line for line in lines)
++
++
++def test_eu_preflight_is_explicit():
++    arguments = cli.build_parser().parse_args(
++        ["preflight", "192.0.2.50", "--experimental-eu"]
++    )
++    assert arguments.experimental_eu is True
++    assert cli.build_parser().parse_args(
++        ["preflight", "192.0.2.50"]
++    ).experimental_eu is False
+diff --git a/tests/test_tu7000.py b/tests/test_tu7000.py
+index c7ab709..500929f 100644
+--- a/tests/test_tu7000.py
++++ b/tests/test_tu7000.py
+@@ -313,3 +313,87 @@ def test_cifs_lab_accepts_an_agent_identity() -> None:
+     )
+ 
+     assert lab.identity.password == identity.password
++
++
++def eu_client(*, build=tu7000.EU_BUILD, hashes=None, **changes):
++    output = probe_output(
++        build=build, hashes=ARTIFACT_HASHES if hashes is None else hashes
++    )
++    for old, new in changes.items():
++        output = output.replace(old, new)
++    return FakeClient(model=tu7000.EU_MODEL, output=output)
++
++
++def test_eu_requires_explicit_opt_in():
++    with pytest.raises(CifsRouteError, match="expected UN65TU7000FXZA"):
++        assess_target("192.0.2.10", client=eu_client())
++
++
++def test_eu_assessment_does_not_claim_validated_root_or_tested_build():
++    result = assess_target(
++        "192.0.2.10", client=eu_client(), experimental_eu=True
++    )
++    assert result.compatibility.status.value == "compatible-untested"
++    assert result.to_dict()["firmware"] == tu7000.EU_FIRMWARE
++    assert result.to_dict()["root_validated_by_preflight"] is False
++    assert result.to_dict()["experimental_eu"] is True
++    assert all(artifact.verified for artifact in result.artifacts)
++    assert tu7000.EU_FIRMWARE in result.render()
++
++
++@pytest.mark.parametrize("build", [tu7000.TESTED_BUILD, "T-KTSU2DEUC-REL-202701010101"])
++@pytest.mark.parametrize("require_tested", [True, False])
++def test_eu_rejects_other_builds_even_without_require_tested(build, require_tested):
++    with pytest.raises(CifsRouteError):
++        assess_target(
++            "192.0.2.10", client=eu_client(build=build),
++            experimental_eu=True, require_tested=require_tested,
++        )
++
++
++@pytest.mark.parametrize("path", ARTIFACT_HASHES)
++@pytest.mark.parametrize("missing", [True, False])
++def test_eu_rejects_missing_or_changed_artifacts(path, missing):
++    hashes = dict(ARTIFACT_HASHES)
++    if missing:
++        del hashes[path]
++    else:
++        hashes[path] = "0" * 64
++    with pytest.raises(CifsRouteError, match="artifact hashes did not match"):
++        assess_target(
++            "192.0.2.10", client=eu_client(hashes=hashes), experimental_eu=True
++        )
++
++
++@pytest.mark.parametrize("old,new", [
++    ("uid=901", "uid=0"),
++    ("4.1.10", "5.4.0"),
++    ("4.1.10", "4.1.11"),
++    ("armv7l", "aarch64"),
++    ("Tizen5/TV 5.5.0", "Tizen6/TV 6.0.0"),
++    ("PS_AGENT=ready", "PS_AGENT=missing"),
++    ("MOUNT_SMB=ready", "MOUNT_SMB=missing"),
++    ("REMOTEPC=ready", "REMOTEPC=missing"),
++])
++def test_eu_preserves_runtime_checks(old, new):
++    with pytest.raises(CifsRouteError):
++        assess_target(
++            "192.0.2.10", client=eu_client(**{old: new}), experimental_eu=True
++        )
++
++
++def test_eu_option_rejects_us_model():
++    with pytest.raises(CifsRouteError, match="expected UE55TU7092UXXH"):
++        assess_target("192.0.2.10", client=FakeClient(), experimental_eu=True)
++
++
++@pytest.mark.parametrize("execute,extra", [
++    (tu7000.execute_probe, {}),
++    (tu7000.execute_command, {"commands": ("id",)}),
++])
++def test_eu_live_mode_rejects_us_confirmation_before_connection(execute, extra):
++    with pytest.raises(CifsRouteError, match=tu7000.EU_CONFIRMATION):
++        execute(
++            "192.0.2.10", confirm=tu7000.CONFIRMATION,
++            accept_saved_profile=True, experimental_eu=True, **extra,
++        )

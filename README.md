@@ -65,6 +65,7 @@ the row says otherwise. Root access and volatile UEP disable are separate result
 | Reported, downstream | `QN55S90DAFXZA` (S90D) | `T-PTMDAKUC-0090-2130.0` | SDB plus capability/mount-namespace/archive-launcher route | [Owner's route description](https://www.reddit.com/r/Tizen/comments/1wl4e0n/i_made_a_minimal_plexyoutube_launcher_the_default/) and [Couchroot device record](https://github.com/splitcipher/couchroot/blob/main/docs/lab/devices/s90d/README.md) |
 | Reported, downstream | `QE50Q80AATXZT` (Q80A) | `T-NKM2DEUC-2301.1` | Vetro's archive-launcher-derived integration; authenticated root agent | [Vetro compatibility record](https://github.com/andrearicci93/vetro#compatibility); not this CLI/release |
 | Reported, downstream | `QE43Q67BAUXXH` (Q67B) | `T-NKLBDEUC-1720.7` | Vetro integration reported UID 0 | [Community diagnostic in Vetro](https://github.com/andrearicci93/vetro#compatibility); cold-boot persistence and device controls unverified |
+| Reported, downstream | `UE55TU7092UXXH` (TU7092) | `T-KTSU2DEUC-2743.0`, build `202607022000` | Remote PC/CIFS temporary root; writable DeviceTracker/awk boot hook and authenticated Vetro agent after cold restart | [Exact-build reproduction and reference sources](docs/research-notes/TU7092_PERSISTENT_ROOT.md); separate local adaptation, not stock archive-root or a firmware unlock |
 | Candidate, untested | Other QN90B variants using `T-PTMAKUC-1602.3` | `1602.3` | FDET route has an identical vulnerable handler in the decrypted update | Same firmware code is strong evidence, but no other size/region was root-tested here |
 | Candidate, untested | Other QN90F variants using the inspected `T-RSMF*` firmware | `1131.0`, `1296.8`, `1301.0` | SDB and archive-launcher prerequisites are present in inspected images | Mali kernel exploitability and the live runtime/preflight remain unverified; 1301.0 is proven only on the model above |
 | Candidate, untested | QN80F / Frame 2025 on `T-PTMFAKUC-0090` | `1131.0`, `1301.0` | SDB plus archive-launcher route is a static candidate | Files and SDB pattern found offline; no live root result or proven Mali route |
@@ -114,7 +115,9 @@ labels reflect its own platform checks, not all community reports in this table.
 
 Root and UEP changes remain volatile. The controller makes root appear
 semi-persistent by reacquiring it from another computer after a TV reboot. It
-does not install a TV-side boot service.
+does not install a TV-side boot service. The separately documented TU7092
+[downstream boot-hook adaptation](docs/research-notes/TU7092_PERSISTENT_ROOT.md)
+is an exact-build exception outside the stock CLI.
 
 ## Capability status
 
