@@ -25,3 +25,5 @@ firmware.
 - [QN90B reproduction](research-notes/QN90B_REPRODUCTION.md)
 - [QN90F reproduction](research-notes/QN90F_REPRODUCTION.md)
 - [SWU AES extraction](research-notes/AES_EXTRACTION.md)
+
+- [TU7092 downstream persistent-root reproduction](research-notes/TU7092_PERSISTENT_ROOT.md): exact-model Remote PC/CIFS bootstrap, DeviceTracker/awk hook, recovery and portable reference sources.
