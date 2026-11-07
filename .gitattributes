@@ -1,0 +1,2 @@
+# Patch context lines intentionally contain their unified-diff prefix.
+docs/research-notes/tu7092-reference/*.patch -whitespace
