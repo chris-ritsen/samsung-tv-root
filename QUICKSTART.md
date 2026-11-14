@@ -54,7 +54,7 @@ payloads; they do not require a local payload build. Put an unusual Tizen Studio
 location before the command, for example
 `./samsung-tv-root --sdb /path/to/sdb doctor`.
 
-These instructions describe v0.0.12 and the current source tree. `archive-root`
+These instructions describe v0.0.13 and the current source tree. `archive-root`
 requires v0.0.9 or newer, or a source checkout. For v0.0.8 and earlier downloads,
 follow the bundled documentation or the
 [v0.0.8 README](https://github.com/chris-ritsen/samsung-tv-root/blob/v0.0.8/README.md).
@@ -151,7 +151,7 @@ acquisition and cleanup; it is not a read-only preflight:
 
 Other models should use this generic route, not a QN90B/QN90F profile chosen
 only for its year or Tizen version. See the
-[exact-model reports](README.md#tv-compatibility).
+[exact-model reports](docs/user/COMPATIBILITY.md).
 `doctor` checks the host installation, not TV compatibility. A missing
 `/usr/bin/dotnet` or missing effective capabilities is a route prerequisite
 failure; `--runtime` only selects an installed compatible runtime and cannot
@@ -161,6 +161,21 @@ The callback must reach the listening host port with the TV's source address
 preserved. Check host firewall and macOS Local Network permissions if callbacks
 time out; NAT/SNAT and TCP relays can change that address and cause rejection.
 Keep the peer-address check enabled.
+
+On Windows, the first run can leave both an Allow and a Block rule in Windows
+Defender Firewall for the same program, and the Block rule wins. Delete the
+Block rule. The rule must name the program that holds the listening socket:
+`samsung-tv-root.exe` for a release, or the base `python.exe` behind a virtual
+environment for a source checkout.
+
+If SDB stops accepting connections on a TV that worked earlier, check
+Developer Mode before anything else. One owner found it switched off again
+after about a day; re-enabling it, re-entering the host address and rebooting
+restored SDB.
+
+If the tool reports that the TV closed both package-name requests immediately,
+the TV's SDB daemon refused the injection and no route here can start. See
+[when the foothold is refused](docs/user/COMPATIBILITY.md#when-the-foothold-is-refused).
 
 This route was live-tested on QN90B and QN90F. It does not yet provide an
 interactive shell, disable UEP, or replace the controller's root method. It
