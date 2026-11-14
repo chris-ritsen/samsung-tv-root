@@ -28,6 +28,20 @@ The checksum is published in Samsung's
 Pass the extracted executable's absolute path with `--sdb /path/to/sdb` before
 the subcommand. This package is for x86-64 hosts, not Linux ARM64.
 
+On Linux, the full Studio install is optional: Samsung's public package
+server publishes `sdb` alone (a few MB, with a Samsung-published SHA256 in
+`pkg_list_ubuntu-64` on the same server):
+
+```console
+curl -O https://download.tizen.org/sdk/tizenstudio/official/binary/sdb_4.2.36_ubuntu-64.zip
+unzip sdb_4.2.36_ubuntu-64.zip
+./sdb-pkg/data/tools/sdb version
+```
+
+Verify the archive against the checksum Samsung lists for the package
+before use. The standalone `sdb` is enough for `preflight` and
+`archive-root`; only SDK features beyond `sdb` need Tizen Studio.
+
 ## 2. Enable Developer Mode
 
 On the TV:
