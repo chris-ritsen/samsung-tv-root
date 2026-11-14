@@ -21,6 +21,7 @@ SDB_APPINSTALL_PREFIX = "0 appinstall tpk "
 SDB_APPINSTALL_MAX_SAFE_BYTES = 510
 SHELL_INJECTION_DELAY_SECONDS = 2.0
 SHELL_INJECTION_MINIMUM_DELTA = 1.5
+SHELL_INJECTION_REFUSAL_SECONDS = 1.0
 REMOTE_SCRIPT_DIRECTORY = PurePosixPath("/home/owner/share/tmp/sdk_tools")
 
 
@@ -229,6 +230,20 @@ class SdbClient:
                 if output:
                     details.append(f"{name} output: {output}")
             suffix = f"; {'; '.join(details)}" if details else ""
+            if _injection_refused(control, control_elapsed) and _injection_refused(
+                delayed, delayed_elapsed
+            ):
+                raise SdbError(
+                    "SDB is connected, but package-name shell execution was not "
+                    "confirmed: the TV closed both requests immediately "
+                    f"(control {control_elapsed:.3f}s, "
+                    f"{SHELL_INJECTION_DELAY_SECONDS:g}s delay probe "
+                    f"{delayed_elapsed:.3f}s). This firmware's SDB daemon appears "
+                    "to refuse the SVE-2025-50109 package-name injection, which "
+                    "every root route in this tool starts from. Retrying, "
+                    "--runtime, and a different model profile do not change "
+                    "that. See the foothold section of docs/user/COMPATIBILITY.md"
+                )
             raise SdbError(
                 "SDB is connected, but package-name shell execution was not "
                 f"confirmed: control took {control_elapsed:.3f}s and the "
@@ -319,7 +334,7 @@ class SdbClient:
                     f"TV did not connect to callback {callback}:{callback_port} "
                     f"within {timeout:g}s; listener {bind}:{callback_port} was active "
                     f"and {injection}. Check the inbound firewall, callback route, "
-                    "and Developer Mode host IP."
+                    f"and Developer Mode host IP.{_firewall_hint()}"
                 ) from error
             with connection:
                 connection.settimeout(timeout)
@@ -393,6 +408,31 @@ class SdbClient:
 def _completed_output(result: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(
         value.strip() for value in (result.stdout, result.stderr) if value.strip()
+    )
+
+
+def _firewall_hint() -> str:
+    if sys.platform == "win32":
+        return (
+            " On Windows, delete any Block rule that Windows Defender Firewall "
+            "created for this program, because a Block rule overrides an Allow "
+            "rule, and allow inbound connections for the executable that holds "
+            f"the listener: {sys.executable}"
+        )
+    if sys.platform == "darwin":
+        return (
+            " On macOS, allow Local Network access for the terminal or program "
+            "running this command."
+        )
+    return ""
+
+
+def _injection_refused(
+    result: subprocess.CompletedProcess[str], elapsed: float
+) -> bool:
+    return (
+        elapsed < SHELL_INJECTION_REFUSAL_SECONDS
+        and _completed_output(result).lower() == "closed"
     )
 
 
