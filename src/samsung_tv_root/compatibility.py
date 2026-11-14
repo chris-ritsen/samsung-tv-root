@@ -125,6 +125,7 @@ class ExploitCompatibilityProfile:
     required_capabilities: frozenset[str]
     capability_probes: tuple[str, ...]
     compatible_builds: frozenset[str] = frozenset()
+    compatible_build_prefixes: tuple[str, ...] = ()
     additional_tested_builds: frozenset[str] = frozenset()
 
     @property
@@ -155,10 +156,8 @@ class ExploitCompatibilityProfile:
         if fingerprint.build_id is None:
             failures.append("build ID was not observed")
         elif not fingerprint.build_id.startswith(
-            self.build_family
-        ) and fingerprint.build_id not in (
-            self.compatible_builds | self.tested_builds
-        ):
+            (self.build_family, *self.compatible_build_prefixes)
+        ) and fingerprint.build_id not in (self.compatible_builds | self.tested_builds):
             failures.append(
                 f"build {fingerprint.build_id} is outside {self.build_family} "
                 "and is not a reviewed compatible build"
@@ -174,10 +173,7 @@ class ExploitCompatibilityProfile:
                 f"architecture is {fingerprint.architecture or 'unknown'}, "
                 f"expected {self.architecture}"
             )
-        if (
-            fingerprint.tizen_release is None
-            or not fingerprint.tizen_release.startswith(self.tizen_prefix)
-        ):
+        if not _same_tizen_platform(fingerprint.tizen_release, self.tizen_prefix):
             failures.append(
                 f"Tizen release is {fingerprint.tizen_release or 'unknown'}, "
                 f"expected {self.tizen_prefix}"
@@ -224,6 +220,33 @@ def _marker_value(output: str, marker: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _same_tizen_platform(observed: str | None, expected: str) -> bool:
+    if observed is None:
+        return False
+    observed_platform = _tizen_platform(observed)
+    return observed_platform is not None and observed_platform == _tizen_platform(
+        expected
+    )
+
+
+def _tizen_platform(release: str) -> tuple[int, int, int, int] | None:
+    match = re.match(
+        r"^Tizen(?P<tizen_major>\d+)(?:\.(?P<tizen_minor>\d+))?/TV\s+"
+        r"(?P<tv_major>\d+)\.(?P<tv_minor>\d+)(?:\.\d*)?(?:\s|$)",
+        release,
+    )
+    if match is None:
+        return None
+    tv_minor = int(match.group("tv_minor"))
+    tizen_minor = match.group("tizen_minor")
+    return (
+        int(match.group("tizen_major")),
+        int(tizen_minor) if tizen_minor is not None else tv_minor,
+        int(match.group("tv_major")),
+        tv_minor,
+    )
+
+
 def _capability_probe(name: str, condition: str) -> str:
     marker = name.upper().replace("-", "_")
     return (
@@ -253,6 +276,7 @@ QN90B_PROFILE = ExploitCompatibilityProfile(
             "&& grep -q 'model=4kbtin' /proc/cmdline",
         ),
     ),
+    compatible_build_prefixes=("T-PTM",),
 )
 
 

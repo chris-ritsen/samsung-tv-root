@@ -13,8 +13,8 @@
 - SDK foothold `uid=901(sdk) gid=901(sdk)` with the Tizen System SMACK label
 
 An exact build match is not required for the root attempt. Compatibility is
-based on the `T-PTMAKUC` firmware family, Tizen 6.5, Linux 5.4 on ARMv7, the
-PontusM `sdp_sparsemem` layout, and read/write access to
+based on the regional `T-PTM` firmware families, TV platform 6.5, Linux 5.4 on
+ARMv7, the PontusM `sdp_sparsemem` layout, and read/write access to
 `/dev/sdp_pqe_fdet`. An untested compatible build receives one bounded attempt.
 The payload discovers and validates its own task and credential objects, and a
 missing object or failed structural check aborts the attempt.
